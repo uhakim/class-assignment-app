@@ -30,6 +30,15 @@ print(f"[SEED] BASE_SEED={BASE_SEED} (재현 필요 시 PowerShell에서: $env:A
 df_students = pd.read_excel('학생자료.xlsx', sheet_name=0)
 df_separation = pd.read_excel('separation.xlsx', sheet_name=0)
 
+# 학번 첫자리에서 현재 학년 추출
+current_grade = 4  # 기본값
+for _, row in df_students.iterrows():
+    student_id = str(row['학번'])
+    if student_id and len(student_id) > 0 and student_id[0].isdigit():
+        current_grade = int(student_id[0])
+        break
+print(f"[학년] 학번 첫자리에서 추출한 현재 학년: {current_grade}학년")
+
 # 분리 규칙 딕셔너리 생성 및 빈도수 계산
 separation_graph = {}
 all_separation_ids = []
@@ -1005,14 +1014,14 @@ current_row = 1
 for prev_class in previous_classes:
     ws.merge_cells(f'A{current_row}:P{current_row}')
     header_cell = ws[f'A{current_row}']
-    header_cell.value = f'4학년 {prev_class}반'
+    header_cell.value = f'{current_grade}학년 {prev_class}반'
     header_cell.fill = header_fill
     header_cell.font = Font(bold=True, size=12)
     header_cell.alignment = center_align
     
     ws.merge_cells(f'Q{current_row}:AF{current_row}')
     header_cell2 = ws[f'Q{current_row}']
-    header_cell2.value = f'4학년 {prev_class}반'
+    header_cell2.value = f'{current_grade}학년 {prev_class}반'
     header_cell2.fill = header_fill
     header_cell2.font = Font(bold=True, size=12)
     header_cell2.alignment = center_align
@@ -1056,7 +1065,7 @@ for prev_class in previous_classes:
         prev_female_students = [s for s in class_assignments[target]['female'] if s['이전학반'] == prev_class]
         
         # 남학생 데이터
-        ws.cell(row=current_row, column=1).value = 4
+        ws.cell(row=current_row, column=1).value = current_grade
         ws.cell(row=current_row, column=2).value = prev_class
         ws.cell(row=current_row, column=3).value = target
         ws.cell(row=current_row, column=4).value = planned_male
@@ -1091,7 +1100,7 @@ for prev_class in previous_classes:
                     cell_이름.font = Font()
         
         # 여학생 데이터
-        ws.cell(row=current_row, column=17).value = 4
+        ws.cell(row=current_row, column=17).value = current_grade
         ws.cell(row=current_row, column=18).value = prev_class
         ws.cell(row=current_row, column=19).value = target
         ws.cell(row=current_row, column=20).value = planned_female
@@ -1142,13 +1151,13 @@ for prev_class in previous_classes:
     prev_total_female = sum(transfer_plan[prev_class]['female'][t] for t in target_classes)
     prev_total = prev_total_male + prev_total_female
     
-    ws.cell(row=current_row, column=1).value = 4
+    ws.cell(row=current_row, column=1).value = current_grade
     ws.cell(row=current_row, column=2).value = prev_class
     ws.cell(row=current_row, column=3).value = "합계"
     ws.cell(row=current_row, column=4).value = prev_total_male
     ws.cell(row=current_row, column=4).font = Font(bold=True)
     
-    ws.cell(row=current_row, column=17).value = 4
+    ws.cell(row=current_row, column=17).value = current_grade
     ws.cell(row=current_row, column=18).value = prev_class
     ws.cell(row=current_row, column=19).value = "합계"
     ws.cell(row=current_row, column=20).value = prev_total_female

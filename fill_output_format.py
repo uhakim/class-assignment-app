@@ -5,6 +5,7 @@
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment
+from openpyxl.utils import get_column_letter
 from datetime import datetime
 import sys
 import re
@@ -17,6 +18,13 @@ current_year = 2026  # 2026학년도
 current_grade = 4  # 기본값 (학번에서 추출)
 previous_grade = 3  # 기본값 (학번에서 추출)
 previous_year = 2025  # 2025학년도 (이전 학년도)
+
+# 학년도 계산: 1~2월이면 현재 연도, 3~12월이면 현재 연도 + 1
+current_month = datetime.now().month
+if current_month >= 3:
+    school_year = current_year + 1
+else:
+    school_year = current_year
 
 print("=" * 80)
 print("출력서식 채우기")
@@ -104,13 +112,13 @@ for idx, row in df_completed.iterrows():
     if pd.notna(row.iloc[2]) and '합계' in str(row.iloc[2]):
         continue
     
-    # 데이터 행 처리 - 학년이 4이고 배정반이 A,B,C,D인 경우
+    # 데이터 행 처리 - 현재 학년이고 배정반이 A,B,C,D인 경우
     grade_val = row.iloc[0]
     prev_class_val = row.iloc[1] if pd.notna(row.iloc[1]) else None
     target_class_val = row.iloc[2] if pd.notna(row.iloc[2]) else None
     
-    # 학년이 4이고, 배정반이 A, B, C, D 중 하나인 경우
-    if pd.notna(grade_val) and (grade_val == 4 or str(grade_val) == '4'):
+    # 현재 학년이고, 배정반이 A, B, C, D 중 하나인 경우
+    if pd.notna(grade_val) and (grade_val == current_grade or str(grade_val) == str(current_grade)):
         if pd.notna(target_class_val) and str(target_class_val) in ['A', 'B', 'C', 'D']:
             # 이전학반 확인
             if pd.notna(prev_class_val):
@@ -226,8 +234,11 @@ for prev_class in [1, 2, 3, 4]:
         ws = wb[sheet_name]
         print(f"  {sheet_name} 시트 처리 중...")
         
-        # 년도 업데이트
-        for row in ws.iter_rows():
+        # 년도 업데이트 (16행(P행)은 제외)
+        for row_idx, row in enumerate(ws.iter_rows(), start=1):
+            # 16행(P행)은 건드리지 않음
+            if row_idx == 16:
+                continue
             for cell in row:
                 if cell.value and isinstance(cell.value, str):
                     if '학년도' in cell.value or '학년' in cell.value:
@@ -298,47 +309,156 @@ for prev_class in [1, 2, 3, 4]:
                     ws.cell(row=row, column=7).value = student.get('제2외국어', '')
                     # 비고
                     ws.cell(row=row, column=8).value = student.get('비고', '')
-                    
-                    # 여학생 시트의 P열(16열)에는 자동으로 입력하지 않음
         
-        # n반 남/여 시트의 2, 16, 17, 30, 44행에 ( 4 )학년 ( 1 )반 채우기
-        section_rows = [2, 16, 17, 30, 44]
-        for idx, section_row in enumerate(section_rows):
-            if section_row <= ws.max_row:
-                # 각 배정반(A, B, C, D)에 맞게 채우기
-                # 16행은 첫 번째 섹션의 헤더이므로 1반으로 처리
-                if section_row == 16:
-                    target_class_for_section = target_classes[0]  # A반
-                elif section_row == 2:
-                    target_class_for_section = target_classes[0]  # A반
-                elif section_row == 17:
-                    target_class_for_section = target_classes[1]  # B반
-                elif section_row == 30:
-                    target_class_for_section = target_classes[2]  # C반
-                elif section_row == 44:
-                    target_class_for_section = target_classes[3]  # D반
+        # n반 남/여 시트의 2행, 16행, 30행, 44행에 (     )학년도 (     )학년 (     )반  남학생 A,B,C,D 형식으로 반 정보 채우기
+        # 2행: A반, 16행: B반, 30행: C반, 44행: D반
+        # 16열(P열)은 완전히 비워야 함
+        print(f"    반 정보 채우기: 시트={sheet_name}, prev_class={prev_class}, gender={gender}")
+        gender_text = '남학생' if gender == '남' else '여학생'
+        
+        # 병합된 셀 범위 확인
+        merged_ranges = list(ws.merged_cells.ranges)
+        
+        def get_merged_cell_coord(row, col):
+            """병합된 셀의 경우 첫 번째 셀의 좌표 반환"""
+            for merged_range in merged_ranges:
+                if row >= merged_range.min_row and row <= merged_range.max_row and \
+                   col >= merged_range.min_col and col <= merged_range.max_col:
+                    return (merged_range.min_row, merged_range.min_col)
+            return (row, col)
+        
+        def safe_write_cell(row, col, value):
+            """병합된 셀을 고려하여 안전하게 셀에 값 쓰기"""
+            try:
+                cell = ws.cell(row=row, column=col)
+                # MergedCell인지 확인
+                if hasattr(cell, 'value') and hasattr(cell, 'coordinate'):
+                    # 병합된 셀의 첫 번째 셀에만 쓰기
+                    actual_row, actual_col = get_merged_cell_coord(row, col)
+                    ws.cell(row=actual_row, column=actual_col).value = value
                 else:
-                    target_class_for_section = target_classes[idx] if idx < len(target_classes) else target_classes[0]
-                # 학년 정보 찾아서 채우기
-                for col_idx in range(1, ws.max_column + 1):
-                    cell_value = ws.cell(row=section_row, column=col_idx).value
-                    if cell_value and isinstance(cell_value, str):
-                        cell_str = str(cell_value)
-                        # (     ) 또는 (  )를 ( 1 ) 형식으로 (띄어쓰기 포함)
-                        if '(     )' in cell_str:
-                            new_value = cell_str.replace('(     )', f'( {prev_class} )')
-                            ws.cell(row=section_row, column=col_idx).value = new_value
-                        elif '(  )' in cell_str:
-                            new_value = cell_str.replace('(  )', f'( {prev_class} )')
-                            ws.cell(row=section_row, column=col_idx).value = new_value
-                        elif '(1)' in cell_str or '(2)' in cell_str or '(3)' in cell_str or '(4)' in cell_str:
-                            # (1) 형식을 ( 1 ) 형식으로 변경
-                            new_value = re.sub(r'\((\d+)\)', r'( \1 )', cell_str)
-                            ws.cell(row=section_row, column=col_idx).value = new_value
-                        # 학년 정보 업데이트
-                        if '( 4 )' in cell_str or '(4)' in cell_str:
-                            new_value = cell_str.replace('( 4 )', f'( {current_grade} )').replace('(4)', f'( {current_grade} )')
-                            ws.cell(row=section_row, column=col_idx).value = new_value
+                    ws.cell(row=row, column=col).value = value
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀 찾아서 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row, col)
+                ws.cell(row=actual_row, column=actual_col).value = value
+        
+        # 2행: A반 (모든 열에 채우기, 단 A열, I열, J열, K열, P열 제외)
+        row_2 = 2
+        class_A = 'A'
+        text_row_2 = f'( {school_year} )학년도 ( {current_grade} )학년 ( {prev_class} )반  {gender_text} {class_A}'
+        excluded_cols = [1, 9, 10, 11, 16]  # A열, I열, J열, K열, P열 제외
+        for col_idx in range(1, ws.max_column + 1):
+            if col_idx in excluded_cols:
+                continue
+            # 기존 값이 반 정보 관련이면 교체
+            try:
+                val = ws.cell(row=row_2, column=col_idx).value
+                if val is not None:
+                    s = str(val)
+                    if '학생' in s or '학년도' in s or ('학년' in s and '반' in s):
+                        safe_write_cell(row_2, col_idx, text_row_2)
+                else:
+                    # 빈 셀이면 채우기
+                    safe_write_cell(row_2, col_idx, text_row_2)
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀에만 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row_2, col_idx)
+                if actual_row == row_2 and actual_col == col_idx:  # 첫 번째 셀인 경우만
+                    ws.cell(row=actual_row, column=actual_col).value = text_row_2
+        print(f"      2행 설정 완료: '{text_row_2}'")
+        
+        # 16행: B반 (모든 열에 채우기, 단 A열, I열, J열, K열, P열 제외)
+        row_16 = 16
+        class_B = 'B'
+        text_row_16 = f'( {school_year} )학년도 ( {current_grade} )학년 ( {prev_class} )반  {gender_text} {class_B}'
+        excluded_cols = [1, 9, 10, 11, 16]  # A열, I열, J열, K열, P열 제외
+        for col_idx in range(1, ws.max_column + 1):
+            if col_idx in excluded_cols:
+                continue
+            # 기존 값이 반 정보 관련이면 교체
+            try:
+                val = ws.cell(row=row_16, column=col_idx).value
+                if val is not None:
+                    s = str(val)
+                    if '학생' in s or '학년도' in s or ('학년' in s and '반' in s):
+                        safe_write_cell(row_16, col_idx, text_row_16)
+                else:
+                    # 빈 셀이면 채우기
+                    safe_write_cell(row_16, col_idx, text_row_16)
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀에만 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row_16, col_idx)
+                if actual_row == row_16 and actual_col == col_idx:  # 첫 번째 셀인 경우만
+                    ws.cell(row=actual_row, column=actual_col).value = text_row_16
+        print(f"      16행 설정 완료: '{text_row_16}'")
+        
+        # 30행: C반 (모든 열에 채우기, 단 A열, I열, J열, K열, P열 제외)
+        row_30 = 30
+        class_C = 'C'
+        text_row_30 = f'( {school_year} )학년도 ( {current_grade} )학년 ( {prev_class} )반  {gender_text} {class_C}'
+        excluded_cols = [1, 9, 10, 11, 16]  # A열, I열, J열, K열, P열 제외
+        for col_idx in range(1, ws.max_column + 1):
+            if col_idx in excluded_cols:
+                continue
+            # 기존 값이 반 정보 관련이면 교체
+            try:
+                val = ws.cell(row=row_30, column=col_idx).value
+                if val is not None:
+                    s = str(val)
+                    if '학생' in s or '학년도' in s or ('학년' in s and '반' in s):
+                        safe_write_cell(row_30, col_idx, text_row_30)
+                else:
+                    # 빈 셀이면 채우기
+                    safe_write_cell(row_30, col_idx, text_row_30)
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀에만 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row_30, col_idx)
+                if actual_row == row_30 and actual_col == col_idx:  # 첫 번째 셀인 경우만
+                    ws.cell(row=actual_row, column=actual_col).value = text_row_30
+        print(f"      30행 설정 완료: '{text_row_30}'")
+        
+        # 44행: D반 (모든 열에 채우기, 단 A열, I열, J열, K열, P열 제외)
+        row_44 = 44
+        class_D = 'D'
+        text_row_44 = f'( {school_year} )학년도 ( {current_grade} )학년 ( {prev_class} )반  {gender_text} {class_D}'
+        excluded_cols = [1, 9, 10, 11, 16]  # A열, I열, J열, K열, P열 제외
+        for col_idx in range(1, ws.max_column + 1):
+            if col_idx in excluded_cols:
+                continue
+            # 기존 값이 반 정보 관련이면 교체
+            try:
+                val = ws.cell(row=row_44, column=col_idx).value
+                if val is not None:
+                    s = str(val)
+                    if '학생' in s or '학년도' in s or ('학년' in s and '반' in s):
+                        safe_write_cell(row_44, col_idx, text_row_44)
+                else:
+                    # 빈 셀이면 채우기
+                    safe_write_cell(row_44, col_idx, text_row_44)
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀에만 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row_44, col_idx)
+                if actual_row == row_44 and actual_col == col_idx:  # 첫 번째 셀인 경우만
+                    ws.cell(row=actual_row, column=actual_col).value = text_row_44
+        print(f"      44행 설정 완료: '{text_row_44}'")
+        
+        # 16열(P열)의 모든 행에서 반 정보 제거 (완전히 비우기)
+        for row_idx in range(1, ws.max_row + 1):
+            try:
+                val = ws.cell(row=row_idx, column=16).value
+                if val is not None:
+                    s = str(val)
+                    if '학년도' in s or ('학년' in s and '반' in s) or '학생' in s:
+                        actual_row, actual_col = get_merged_cell_coord(row_idx, 16)
+                        if actual_row == row_idx and actual_col == 16:  # 첫 번째 셀인 경우만
+                            ws.cell(row=actual_row, column=actual_col).value = None
+                        print(f"        16열 {row_idx}행: 반 정보 제거")
+            except AttributeError:
+                # MergedCell인 경우 첫 번째 셀에만 쓰기
+                actual_row, actual_col = get_merged_cell_coord(row_idx, 16)
+                if actual_row == row_idx and actual_col == 16:  # 첫 번째 셀인 경우만
+                    ws.cell(row=actual_row, column=actual_col).value = None
 
 # 학급별 시트 채우기
 print("\n학급별 시트 채우는 중...")
@@ -486,6 +606,12 @@ if '통계표' in wb.sheetnames:
                col >= merged_range.min_col and col <= merged_range.max_col:
                 return (merged_range.min_row, merged_range.min_col)
         return (row, col)
+    
+    def safe_write_stat_cell(row, col, value):
+        """통계표에서 병합된 셀을 고려하여 안전하게 쓰기"""
+        merge_row, merge_col = get_merged_cell_value(row, col)
+        if merge_row == row and merge_col == col:  # 첫 번째 셀인 경우만 쓰기
+            ws.cell(row=row, column=col).value = value
     
     # 통계표 구조:
     # 행 3~6: A반의 1~4반 데이터 (C3부터 데이터 시작)
@@ -696,13 +822,6 @@ if '통계표' in wb.sheetnames:
                             level_1_count += 1
                         elif 'P' in level_str.upper() or '부진' in level_str:
                             level_p_count += 1
-                
-                # 병합된 셀에 안전하게 쓰기
-                def safe_write_stat_cell(row, col, value):
-                    """통계표에서 병합된 셀을 고려하여 안전하게 쓰기"""
-                    merge_row, merge_col = get_merged_cell_value(row, col)
-                    if merge_row == row and merge_col == col:  # 첫 번째 셀인 경우만 쓰기
-                        ws.cell(row=row, column=col).value = value
                 
                 # 영어반 통계 입력 (C열부터 시작)
                 # C열: E1/E2, D열: E3/E4, E열: E5/E6, F열: E7/E8
