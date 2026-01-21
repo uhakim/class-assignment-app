@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+
+# 빌드/배포 산출물
+build/
+dist/
+*.spec
+
+# 엑셀 결과/임시 파일은 커밋에서 제외 (템플릿은 따로 관리 추천)
+반편성_배정표*.xlsx
+반편성_완료*.xlsx
+출력서식_완료*.xlsx
+temp_completed_data.xlsx
+
+# 백업 파일
+*.bak
+
+# Streamlit, 로그 등 (필요시)
+.streamlit/
+logs/
+
