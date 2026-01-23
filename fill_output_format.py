@@ -1018,9 +1018,14 @@ if '전체' in wb.sheetnames:
             cell = ws.cell(row=row_idx, column=col_idx)
             if cell.value and isinstance(cell.value, str):
                 cell_str = str(cell.value)
+                # 3행의 학년만 학번 첫자리로 변경 (학년도는 건드리지 않음)
+                if row_idx == 3 and re.search(r'\d+학년', cell_str):
+                    # 3행: 학년 숫자만 학번 첫자리(current_grade)로 변경
+                    # 학년도는 그대로 두고 학년만 변경
+                    cell.value = re.sub(r'(\d+)학년', f'{current_grade}학년', cell_str)
                 # 진급학년 학반발표 제목 패턴: "2026학년도 진급학년 학반발표(2025학년도 3학년)" 형식
                 # 괄호 안의 학년 정보만 학번 첫자리(current_grade)를 그대로 사용
-                if '진급학년' in cell_str and '학반발표' in cell_str:
+                elif '진급학년' in cell_str and '학반발표' in cell_str:
                     # 괄호 안의 학년 정보를 current_grade(학번 첫자리)로 변경 (정규표현식으로 숫자 학년 찾기)
                     # 패턴: (숫자학년도 공백)(숫자학년)
                     # replacement string에서 백레퍼런스와 변수를 올바르게 처리
