@@ -1023,6 +1023,20 @@ if '전체' in wb.sheetnames:
                     # 3행: 학년 숫자만 학번 첫자리(current_grade)로 변경
                     # 학년도는 그대로 두고 학년만 변경
                     cell.value = re.sub(r'(\d+)학년', f'{current_grade}학년', cell_str)
+                # 3행 아래 행들: "2-1", "2-2" 같은 패턴을 학번 첫자리 기반으로 변경
+                elif row_idx > 3:
+                    # "숫자 - 숫자" 패턴을 학번 첫자리 기반으로 변경
+                    if re.search(r'\d+\s*-\s*\d+', cell_str):
+                        cell.value = re.sub(r'(\d+)\s*-\s*(\d+)', f'{current_grade} - \\2', cell_str)
+                    # "○ - 1" 같은 패턴도 학번 첫자리 기반으로 변경
+                    if '○ - 1' in cell_str:
+                        cell.value = cell_str.replace('○ - 1', f'{current_grade} - 1')
+                    if '○ - 2' in cell_str:
+                        cell.value = cell_str.replace('○ - 2', f'{current_grade} - 2')
+                    if '○ - 3' in cell_str:
+                        cell.value = cell_str.replace('○ - 3', f'{current_grade} - 3')
+                    if '○ - 4' in cell_str:
+                        cell.value = cell_str.replace('○ - 4', f'{current_grade} - 4')
                 # 진급학년 학반발표 제목 패턴: "2026학년도 진급학년 학반발표(2025학년도 3학년)" 형식
                 # 괄호 안의 학년 정보만 학번 첫자리(current_grade)를 그대로 사용
                 elif '진급학년' in cell_str and '학반발표' in cell_str:
@@ -1054,18 +1068,20 @@ if '전체' in wb.sheetnames:
                 # 2022를 2026으로 (일반)
                 if '2022' in cell_str and '진급반' not in cell_str:
                     cell.value = cell_str.replace('2022', str(current_display_year))
-                # ○ - 1을 현재 학년 - 1로 (현재 학년 기준, 학번 첫자리)
-                if '○ - 1' in cell_str:
-                    cell.value = cell_str.replace('○ - 1', f'{display_grade} - 1')
-                if '○ - 2' in cell_str:
-                    cell.value = cell_str.replace('○ - 2', f'{display_grade} - 2')
-                if '○ - 3' in cell_str:
-                    cell.value = cell_str.replace('○ - 3', f'{display_grade} - 3')
-                if '○ - 4' in cell_str:
-                    cell.value = cell_str.replace('○ - 4', f'{display_grade} - 4')
-                # "2 - 1" 같은 패턴을 "3 - 1"로 변경 (현재 학년으로)
-                if re.search(r'\d+\s*-\s*\d+', cell_str):
-                    cell.value = re.sub(r'(\d+)\s*-\s*(\d+)', f'{display_grade} - \\2', cell_str)
+                # 3행 이하가 아닌 경우에만 기존 로직 적용 (3행 아래는 위에서 이미 처리)
+                if row_idx <= 3:
+                    # ○ - 1을 현재 학년 - 1로 (현재 학년 기준, 학번 첫자리)
+                    if '○ - 1' in cell_str:
+                        cell.value = cell_str.replace('○ - 1', f'{display_grade} - 1')
+                    if '○ - 2' in cell_str:
+                        cell.value = cell_str.replace('○ - 2', f'{display_grade} - 2')
+                    if '○ - 3' in cell_str:
+                        cell.value = cell_str.replace('○ - 3', f'{display_grade} - 3')
+                    if '○ - 4' in cell_str:
+                        cell.value = cell_str.replace('○ - 4', f'{display_grade} - 4')
+                    # "2 - 1" 같은 패턴을 "3 - 1"로 변경 (현재 학년으로)
+                    if re.search(r'\d+\s*-\s*\d+', cell_str):
+                        cell.value = re.sub(r'(\d+)\s*-\s*(\d+)', f'{display_grade} - \\2', cell_str)
                 # 2024학년도를 이전 학년도로
                 if '2024학년도' in cell_str:
                     cell.value = cell_str.replace('2024학년도', f'{display_year}학년도')
