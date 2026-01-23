@@ -120,11 +120,18 @@ print()
 print("=" * 80)
 print("transfer_plan 확인")
 print("=" * 80)
+print(f"[중요] 현재 ASSIGN_MODE: {ASSIGN_MODE}")
 for prev_class in [1, 2, 3, 4]:
     male_vals = [transfer_plan[prev_class]['male'][t] for t in ['A','B','C','D']]
     female_vals = [transfer_plan[prev_class]['female'][t] for t in ['A','B','C','D']]
-    print(f"{prev_class}반 남학생: {male_vals} (합계: {sum(male_vals)}명)")
-    print(f"{prev_class}반 여학생: {female_vals} (합계: {sum(female_vals)}명)")
+    print(f"{prev_class}반 남학생: A={male_vals[0]}, B={male_vals[1]}, C={male_vals[2]}, D={male_vals[3]} (합계: {sum(male_vals)}명)")
+    print(f"{prev_class}반 여학생: A={female_vals[0]}, B={female_vals[1]}, C={female_vals[2]}, D={female_vals[3]} (합계: {sum(female_vals)}명)")
+    # 4반 편성 모드에서 이전학반 4반이 A로 배정되지 않으면 경고
+    if ASSIGN_MODE == "4반" and prev_class == 4:
+        if male_vals[0] == 0 and female_vals[0] == 0:
+            print(f"  [경고] 4반 편성 모드인데 이전학반 4반이 A반으로 배정되지 않았습니다!")
+        else:
+            print(f"  [확인] 이전학반 4반이 A반으로 배정됨 (남 {male_vals[0]}명, 여 {female_vals[0]}명)")
 print()
 
 # 디버깅: 실제로 모이는 학생 수 확인
@@ -892,10 +899,14 @@ print("=" * 80)
 print("배정 결과 요약")
 print("=" * 80)
 for target in target_classes:
-    male_count = len(class_assignments[target]['male'])
-    female_count = len(class_assignments[target]['female'])
-    total = male_count + female_count
-    print(f"{target}반: 총 {total}명 (남 {male_count}명, 여 {female_count}명)")
+    actual_male = len(class_assignments[target]['male'])
+    actual_female = len(class_assignments[target]['female'])
+    actual_total = actual_male + actual_female
+    target_male = target_distribution['male'][target]
+    target_female = target_distribution['female'][target]
+    target_total = target_distribution['total'][target]
+    match_status = "✓" if (actual_male == target_male and actual_female == target_female) else "✗"
+    print(f"{target}반: 실제 {actual_total}명 (남 {actual_male}명, 여 {actual_female}명) / 목표 {target_total}명 (남 {target_male}명, 여 {target_female}명) {match_status}")
 
 # 배정되지 않은 학생(범용) 확인
 print("\n배정되지 않은 학생 확인:")
@@ -1242,18 +1253,36 @@ for col_idx, header in enumerate(summary_headers, 1):
     cell.border = border_style
 current_row += 1
 
+# 실제 배정된 학생 수 계산 및 검증
+total_actual_male = 0
+total_actual_female = 0
+total_actual = 0
+
 for target in target_classes:
-    # 색칠된 칸수 기준 (transfer_plan에 정해진 인원수)
-    planned_male = target_distribution['male'][target]
-    planned_female = target_distribution['female'][target]
-    planned_total = target_distribution['total'][target]
+    # 실제 배정된 학생 수 사용 (class_assignments 기준)
+    actual_male = len(class_assignments[target]['male'])
+    actual_female = len(class_assignments[target]['female'])
+    actual_total = actual_male + actual_female
+    
+    # 목표 인원수와 비교
+    target_male = target_distribution['male'][target]
+    target_female = target_distribution['female'][target]
+    target_total = target_distribution['total'][target]
+    
+    total_actual_male += actual_male
+    total_actual_female += actual_female
+    total_actual += actual_total
+    
+    # 불일치 시 경고 출력
+    if actual_male != target_male or actual_female != target_female:
+        print(f"[경고] {target}반: 실제 {actual_total}명 (남 {actual_male}, 여 {actual_female}) != 목표 {target_total}명 (남 {target_male}, 여 {target_female})")
     
     ws.cell(row=current_row, column=1).value = f"{target}반"
     ws.cell(row=current_row, column=1).fill = colors[target]
     ws.cell(row=current_row, column=1).font = Font(bold=True)
-    ws.cell(row=current_row, column=2).value = planned_male
-    ws.cell(row=current_row, column=3).value = planned_female
-    ws.cell(row=current_row, column=4).value = planned_total
+    ws.cell(row=current_row, column=2).value = actual_male
+    ws.cell(row=current_row, column=3).value = actual_female
+    ws.cell(row=current_row, column=4).value = actual_total
     ws.cell(row=current_row, column=4).font = Font(bold=True)
     
     for col in range(1, 5):
@@ -1262,6 +1291,33 @@ for target in target_classes:
         cell.border = border_style
     
     current_row += 1
+
+# 합계 행 추가
+summary_headers_with_total = ['합계', '남학생', '여학생', '총학생수']
+for col_idx, header in enumerate(summary_headers_with_total, 1):
+    cell = ws.cell(row=current_row, column=col_idx)
+    if col_idx == 1:
+        cell.value = "합계"
+    elif col_idx == 2:
+        cell.value = total_actual_male
+    elif col_idx == 3:
+        cell.value = total_actual_female
+    elif col_idx == 4:
+        cell.value = total_actual
+    cell.fill = header_fill
+    cell.font = Font(bold=True)
+    cell.alignment = center_align
+    cell.border = border_style
+
+# 검증 출력
+print(f"\n[최종 반별 구성 요약 검증]")
+print(f"실제 배정 합계: 총 {total_actual}명 (남 {total_actual_male}명, 여 {total_actual_female}명)")
+print(f"목표 합계: 총 {total_students}명 (남 {male_count}명, 여 {female_count}명)")
+if total_actual == total_students and total_actual_male == male_count and total_actual_female == female_count:
+    print("✓ 모든 숫자가 일치합니다!")
+else:
+    print("✗ 숫자가 일치하지 않습니다!")
+    print(f"  차이: 총 {total_actual - total_students}명, 남 {total_actual_male - male_count}명, 여 {total_actual_female - female_count}명")
 
 # 열 너비 조정
 for col in ['A', 'B', 'Q', 'R']:
