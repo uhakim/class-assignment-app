@@ -996,9 +996,9 @@ if '전체' in wb.sheetnames:
     ws = wb['전체']
     
     # 년도 업데이트 및 진급반 정보 채우기
-    # 제목: "2025학년도 {previous_grade}학년" (이전 학년도 기준)
-    # 학년 표시는 이전 학년(previous_grade)을 사용 (학번 첫자리 - 1)
-    display_grade = previous_grade  # 이전 학년 (학번 첫자리 - 1)
+    # 제목: "2025학년도 {current_grade}학년" (이전 학년도 기준)
+    # 학년 표시는 학번 첫자리를 그대로 사용
+    display_grade = current_grade  # 학번 첫자리 (예: 학번이 3으로 시작하면 3학년)
     display_year = previous_year  # 2025학년도 (이전 학년도)
     current_display_year = current_year  # 2026학년도 (현재 학년도)
     
