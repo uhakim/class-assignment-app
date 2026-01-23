@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-분리 규칙을 적용한 학생 배정 및 엑셀 생성 (최종 통합 버전)
+분리 규칙을 적용한 학생 배정 및 엑셀 생성 (4반/3반 편성 선택)
+
+- 4반: 1,2,3,4반 → A,B,C,D 자유 배정 (기존과 동일)
+- 3반: 1→B,C,D / 2→A,C,D / 3→A,B,D / 4→A,B,C (선생님 연속 지도 배제)
+환경변수 ASSIGN_MODE로 "4반" 또는 "3반" 지정.
 """
 import pandas as pd
 import random
@@ -14,6 +18,7 @@ from class_assignment_logic import (
     calculate_class_distribution,
     calculate_transfer_plan
 )
+from class_assignment_logic import calculate_transfer_plan_3반, ALLOWED_TARGETS_3반
 
 # 랜덤 시드 설정
 # - 기본값: 매 실행마다 달라지도록 현재 시간 기반 시드 사용
@@ -25,6 +30,9 @@ except Exception:
     BASE_SEED = int(time.time())
 random.seed(BASE_SEED)
 print(f"[SEED] BASE_SEED={BASE_SEED} (재현 필요 시 PowerShell에서: $env:ASSIGN_SEED={BASE_SEED})")
+
+ASSIGN_MODE = os.environ.get("ASSIGN_MODE", "4반")
+print(f"[MODE] ASSIGN_MODE={ASSIGN_MODE} (4반: 자유 배정 / 3반: 선생님 연속 지도 배제)")
 
 # 데이터 읽기
 df_students = pd.read_excel('학생자료.xlsx', sheet_name=0)
@@ -92,7 +100,10 @@ for prev_class in [1, 2, 3, 4]:
 
 # 목표 반 배정 계산 (전체 학생 기준)
 target_distribution = calculate_class_distribution(total_students, male_count, female_count)
-transfer_plan = calculate_transfer_plan(previous_class_counts, target_distribution)
+if ASSIGN_MODE == "3반":
+    transfer_plan = calculate_transfer_plan_3반(previous_class_counts, target_distribution)
+else:
+    transfer_plan = calculate_transfer_plan(previous_class_counts, target_distribution)
 
 # 디버깅: 전체 목표 분배 확인
 print("=" * 80)
@@ -352,10 +363,11 @@ def calculate_swap_improvement(student1, student2, target1, target2, class_assig
 
 def assign_students_with_retry(class_assignments, df_separation_students, separation_graph, transfer_plan, 
                                 target_distribution, df_students, previous_classes, target_classes, 
-                                frequency, separation_student_ids, random_seed=None):
+                                frequency, separation_student_ids, random_seed=None, allowed_targets_map=None):
     """
     학생 배정을 시도하고, 분리 규칙 위반 수를 반환
     random_seed를 변경하여 여러 번 시도할 수 있음
+    allowed_targets_map: 3반 편성 시 이전학반별 배정 가능 반 (None이면 4반 자유 배정)
     """
     if random_seed is not None:
         random.seed(random_seed)
@@ -388,7 +400,8 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
         # 남학생 배정 - separation.xlsx에 등장한 학생들만 배정
         # transfer_plan에 정해진 인원수에 맞춰 가능한 한 균등하게 배정
         male_transfers = transfer_plan[prev_class]['male']
-        
+        targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+
         # 각 학생에 대해 배정 가능한 반을 찾고, transfer_plan에 맞춰 배정
         for student in prev_male:
             student_id = student['학번']
@@ -404,9 +417,8 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
             
             # 각 반별로 분리 규칙을 만족하는지 확인하고 점수 계산
             candidates = []
-            violation_candidates = []  # 분리 규칙을 위반하더라도 배정 가능한 후보
             
-            for target in target_classes:
+            for target in targets_for_prev:
                 needed = male_transfers[target]
                 current = len([s for s in class_assignments[target]['male'] if s['이전학반'] == prev_class])
                 
@@ -415,46 +427,36 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                     continue
                 
                 # 분리 규칙 확인
-                violation_count = 0
                 can_assign = True
                 if student_id in separation_graph:
                     for separated_id in separation_graph[student_id]:
                         for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
                             if assigned_student['학번'] == separated_id:
                                 can_assign = False
-                                violation_count += 1
                                 break
-                        if not can_assign and violation_count > 0:
+                        if not can_assign:
                             break
                 
-                # transfer_plan에 맞춰 배정하기 위해 점수 계산
-                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '남')
-                # current와 needed의 차이가 클수록 우선 배정 (추가 보너스는 calculate_assignment_score 내부에서 처리됨)
+                if not can_assign:
+                    continue
                 
-                # 분리 규칙을 만족하는 경우 우선 후보에 추가
-                if can_assign:
-                    candidates.append((score, target, 0))
-                else:
-                    # 위반하더라도 후보에 추가 (위반 수를 페널티로 추가)
-                    violation_candidates.append((score + violation_count * 10000, target, violation_count))
+                # 분리 규칙을 만족하는 경우만 후보에 추가
+                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '남')
+                candidates.append((score, target, 0))
             
-            # 분리 규칙을 위반하지 않는 경우만 배정
-            # candidates가 비어있으면 violation_candidates 사용 (강제 배정)
+            # 분리 규칙을 만족하는 반에만 배정 (위반 시 배정하지 않음)
             best_target = None
             if candidates:
                 candidates.sort(key=lambda x: x[0])
                 best_target = candidates[0][1]
                 class_assignments[best_target]['male'].append(student)
-            elif violation_candidates:
-                # 분리 규칙 위반이 있더라도 최소한으로 위반하는 반에 배정
-                violation_candidates.sort(key=lambda x: (x[2], x[0]))  # 위반 수 우선, 점수 차순위
-                best_target = violation_candidates[0][1]
-                class_assignments[best_target]['male'].append(student)
+            # 만족하는 반이 없으면 배정하지 않음 → remaining으로 수집됨
         
         # 여학생 배정 - separation.xlsx에 등장한 학생들만 배정
         # transfer_plan에 정해진 인원수에 맞춰 가능한 한 균등하게 배정
         female_transfers = transfer_plan[prev_class]['female']
-        
+        targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+
         # 각 학생에 대해 배정 가능한 반을 찾고, transfer_plan에 맞춰 배정
         for student in prev_female:
             student_id = student['학번']
@@ -470,9 +472,8 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
             
             # 각 반별로 분리 규칙을 만족하는지 확인하고 점수 계산
             candidates = []
-            violation_candidates = []  # 분리 규칙을 위반하더라도 배정 가능한 후보
             
-            for target in target_classes:
+            for target in targets_for_prev:
                 needed = female_transfers[target]
                 current = len([s for s in class_assignments[target]['female'] if s['이전학반'] == prev_class])
                 
@@ -481,41 +482,30 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                     continue
                 
                 # 분리 규칙 확인
-                violation_count = 0
                 can_assign = True
                 if student_id in separation_graph:
                     for separated_id in separation_graph[student_id]:
                         for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
                             if assigned_student['학번'] == separated_id:
                                 can_assign = False
-                                violation_count += 1
                                 break
-                        if not can_assign and violation_count > 0:
+                        if not can_assign:
                             break
                 
-                # transfer_plan에 맞춰 배정하기 위해 점수 계산
-                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '여')
-                # current와 needed의 차이가 클수록 우선 배정 (추가 보너스는 calculate_assignment_score 내부에서 처리됨)
+                if not can_assign:
+                    continue
                 
-                # 분리 규칙을 만족하는 경우 우선 후보에 추가
-                if can_assign:
-                    candidates.append((score, target, 0))
-                else:
-                    # 위반하더라도 후보에 추가 (위반 수를 페널티로 추가)
-                    violation_candidates.append((score + violation_count * 10000, target, violation_count))
+                # 분리 규칙을 만족하는 경우만 후보에 추가
+                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '여')
+                candidates.append((score, target, 0))
             
-            # 분리 규칙을 위반하지 않는 경우만 배정
-            # candidates가 비어있으면 violation_candidates 사용 (강제 배정)
+            # 분리 규칙을 만족하는 반에만 배정 (위반 시 배정하지 않음)
             best_target = None
             if candidates:
                 candidates.sort(key=lambda x: x[0])
                 best_target = candidates[0][1]
                 class_assignments[best_target]['female'].append(student)
-            elif violation_candidates:
-                # 분리 규칙 위반이 있더라도 최소한으로 위반하는 반에 배정
-                violation_candidates.sort(key=lambda x: (x[2], x[0]))  # 위반 수 우선, 점수 차순위
-                best_target = violation_candidates[0][1]
-                class_assignments[best_target]['female'].append(student)
+            # 만족하는 반이 없으면 배정하지 않음 → remaining으로 수집됨
         
         # 디버깅: 1반 남학생 배정 결과 확인
         if prev_class == 1:
@@ -569,130 +559,78 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
         for student in remaining_male:
             student_id = student['학번']
             prev_class = student['이전학반']
-            
+            targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+
             best_target = None
             best_score = float('inf')
-            best_violation = float('inf')
-            violation_target = None
-            violation_score = float('inf')
             
-            for target in target_classes:
-                # transfer_plan 제한 완화: 모든 반 고려 (선호도만 다름)
+            for target in targets_for_prev:
                 needed = transfer_plan[prev_class]['male'][target]
                 current = len([s for s in class_assignments[target]['male'] if s['이전학반'] == prev_class])
                 
-                # 분리 규칙 확인
-                violation_count = 0
                 can_assign = True
                 if student_id in separation_graph:
                     for separated_id in separation_graph[student_id]:
                         for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
                             if assigned_student['학번'] == separated_id:
                                 can_assign = False
-                                violation_count += 1
                                 break
                         if not can_assign:
                             break
                 
-                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '남')
-                # transfer_plan 제한에 따른 페널티 추가 (완화)
-                if current >= needed:
-                    score += (current - needed + 1) * 500  # 제한 초과 시 페널티
+                if not can_assign:
+                    continue
                 
-                if can_assign:
-                    # 분리 규칙을 만족하는 경우 우선
-                    if score < best_score:
-                        best_score = score
-                        best_target = target
-                else:
-                    # 분리 규칙 위반이 있더라도 최소한으로 위반하는 반 저장
-                    if violation_count < best_violation or (violation_count == best_violation and score < violation_score):
-                        best_violation = violation_count
-                        violation_score = score
-                        violation_target = target
+                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '남')
+                if current >= needed:
+                    score += (current - needed + 1) * 500
+                
+                if score < best_score:
+                    best_score = score
+                    best_target = target
             
-            # 배정: 분리 규칙 만족 반 우선, 없으면 최소 위반 반에 배정
             if best_target:
                 class_assignments[best_target]['male'].append(student)
-            elif violation_target:
-                class_assignments[violation_target]['male'].append(student)
             else:
-                # 모든 반에서 분리 규칙 위반하는 경우, 전체 인원이 가장 적은 반에 배정
-                min_total = float('inf')
-                fallback_target = None
-                for target in target_classes:
-                    total = len(class_assignments[target]['male']) + len(class_assignments[target]['female'])
-                    if total < min_total:
-                        min_total = total
-                        fallback_target = target
-                if fallback_target:
-                    class_assignments[fallback_target]['male'].append(student)
-                else:
-                    new_remaining_male.append(student)
+                new_remaining_male.append(student)
         
         for student in remaining_female:
             student_id = student['학번']
             prev_class = student['이전학반']
-            
+            targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+
             best_target = None
             best_score = float('inf')
-            best_violation = float('inf')
-            violation_target = None
-            violation_score = float('inf')
             
-            for target in target_classes:
-                # transfer_plan 제한 완화: 모든 반 고려 (선호도만 다름)
+            for target in targets_for_prev:
                 needed = transfer_plan[prev_class]['female'][target]
                 current = len([s for s in class_assignments[target]['female'] if s['이전학반'] == prev_class])
                 
-                # 분리 규칙 확인
-                violation_count = 0
                 can_assign = True
                 if student_id in separation_graph:
                     for separated_id in separation_graph[student_id]:
                         for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
                             if assigned_student['학번'] == separated_id:
                                 can_assign = False
-                                violation_count += 1
                                 break
                         if not can_assign:
                             break
                 
-                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '여')
-                # transfer_plan 제한에 따른 페널티 추가 (완화)
-                if current >= needed:
-                    score += (current - needed + 1) * 500  # 제한 초과 시 페널티
+                if not can_assign:
+                    continue
                 
-                if can_assign:
-                    # 분리 규칙을 만족하는 경우 우선
-                    if score < best_score:
-                        best_score = score
-                        best_target = target
-                else:
-                    # 분리 규칙 위반이 있더라도 최소한으로 위반하는 반 저장
-                    if violation_count < best_violation or (violation_count == best_violation and score < violation_score):
-                        best_violation = violation_count
-                        violation_score = score
-                        violation_target = target
+                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '여')
+                if current >= needed:
+                    score += (current - needed + 1) * 500
+                
+                if score < best_score:
+                    best_score = score
+                    best_target = target
             
-            # 배정: 분리 규칙 만족 반 우선, 없으면 최소 위반 반에 배정
             if best_target:
                 class_assignments[best_target]['female'].append(student)
-            elif violation_target:
-                class_assignments[violation_target]['female'].append(student)
             else:
-                # 모든 반에서 분리 규칙 위반하는 경우, 전체 인원이 가장 적은 반에 배정
-                min_total = float('inf')
-                fallback_target = None
-                for target in target_classes:
-                    total = len(class_assignments[target]['male']) + len(class_assignments[target]['female'])
-                    if total < min_total:
-                        min_total = total
-                        fallback_target = target
-                if fallback_target:
-                    class_assignments[fallback_target]['female'].append(student)
-                else:
-                    new_remaining_female.append(student)
+                new_remaining_female.append(student)
         
         remaining_male = new_remaining_male
         remaining_female = new_remaining_female
@@ -748,7 +686,8 @@ for attempt in range(max_attempts):
     violation_count = assign_students_with_retry(
         class_assignments, df_separation_students, separation_graph, transfer_plan,
         target_distribution, df_students, previous_classes, target_classes,
-        frequency, separation_student_ids, random_seed=(BASE_SEED + attempt)
+        frequency, separation_student_ids, random_seed=(BASE_SEED + attempt),
+        allowed_targets_map=ALLOWED_TARGETS_3반 if ASSIGN_MODE == "3반" else None
     )
     
     if violation_count < best_violation_count:
