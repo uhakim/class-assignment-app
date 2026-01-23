@@ -1022,7 +1022,9 @@ if '전체' in wb.sheetnames:
                 # 괄호 안의 학년 정보만 학번 첫자리(current_grade)를 그대로 사용
                 if '진급학년' in cell_str and '학반발표' in cell_str:
                     # 괄호 안의 학년 정보를 current_grade(학번 첫자리)로 변경 (정규표현식으로 숫자 학년 찾기)
-                    cell.value = re.sub(r'\((\d+)학년도\s+)(\d+)학년\)', rf'(\1{current_grade}학년)', cell_str)
+                    # replacement string에서 백레퍼런스와 변수를 올바르게 처리
+                    replacement = f'(\\1{current_grade}학년)'
+                    cell.value = re.sub(r'\((\d+)학년도\s+)(\d+)학년\)', replacement, cell_str)
                     # 2025학년도 부분도 업데이트
                     if '2025학년도' in str(cell.value):
                         cell.value = str(cell.value).replace('2025학년도', f'{display_year}학년도')
