@@ -1023,8 +1023,10 @@ if '전체' in wb.sheetnames:
                     # 3행: 학년 숫자만 학번 첫자리(current_grade)로 변경
                     # 학년도는 그대로 두고 학년만 변경
                     cell.value = re.sub(r'(\d+)학년', f'{current_grade}학년', cell_str)
+                
                 # 3행 아래 행들: "2-1", "2-2" 같은 패턴을 학번 첫자리 기반으로 변경
-                elif row_idx > 3:
+                # 이 조건은 다른 조건과 독립적으로 처리되어야 함
+                if row_idx > 3:
                     # "숫자 - 숫자" 패턴을 학번 첫자리 기반으로 변경
                     if re.search(r'\d+\s*-\s*\d+', cell_str):
                         cell.value = re.sub(r'(\d+)\s*-\s*(\d+)', f'{current_grade} - \\2', cell_str)
