@@ -53,7 +53,7 @@ if st.session_state.step == 0:
         format_func=lambda x: (
             "**4반 편성** — 1,2,3,4반 → A,B,C,D 자유 배정 (기존과 동일)"
             if x == "4반" else
-            "**3반 편성** — 1→B,C,D / 2→A,C,D / 3→A,B,D / 4→B,C,D (담당 선생님 연속 지도 배제)"
+            "**3반 편성** — 1→B,C,D / 2→A,C,D / 3→A,B,D / 4→A,B,C (담당 선생님 연속 지도 배제)"
         ),
         horizontal=True,
         key="mode_radio"
