@@ -996,9 +996,9 @@ if '전체' in wb.sheetnames:
     ws = wb['전체']
     
     # 년도 업데이트 및 진급반 정보 채우기
-    # 제목: "2025학년도 3학년" (이전 학년도 기준)
-    # 하지만 학년 표시는 현재 학년(3학년)을 사용
-    display_grade = current_grade  # 3학년 (현재 학년 - 학번 첫자리)
+    # 제목: "2025학년도 {previous_grade}학년" (이전 학년도 기준)
+    # 학년 표시는 이전 학년(previous_grade)을 사용 (학번 첫자리 - 1)
+    display_grade = previous_grade  # 이전 학년 (학번 첫자리 - 1)
     display_year = previous_year  # 2025학년도 (이전 학년도)
     current_display_year = current_year  # 2026학년도 (현재 학년도)
     
@@ -1019,11 +1019,23 @@ if '전체' in wb.sheetnames:
             if cell.value and isinstance(cell.value, str):
                 cell_str = str(cell.value)
                 # 2025학년도를 이전 학년도로 (제목용)
-                if '2025학년도' in cell_str and '3학년' in cell_str:
-                    cell.value = cell_str.replace('2025학년도', f'{display_year}학년도')
-                # 2026학년도 3학년 -> 2025학년도 3학년
+                # 괄호 안의 학년도와 학년 정보 업데이트: (2025학년도 3학년) -> (2025학년도 {previous_grade}학년)
+                if '2025학년도' in cell_str and re.search(r'\d+학년', cell_str):
+                    # 괄호 안의 학년 정보를 previous_grade로 변경
+                    cell.value = re.sub(r'\((\d+)학년도\s+)\d+학년\)', rf'(\1{display_grade}학년)', cell_str)
+                    # 2025학년도 부분도 업데이트
+                    cell.value = str(cell.value).replace('2025학년도', f'{display_year}학년도')
+                # 2026학년도 {current_grade}학년 -> 2025학년도 {previous_grade}학년
                 if f'{current_display_year}학년도 {current_grade}학년' in cell_str:
                     cell.value = cell_str.replace(f'{current_display_year}학년도 {current_grade}학년', f'{display_year}학년도 {display_grade}학년')
+                # 진급학년 학반발표 제목 패턴: "2026학년도 진급학년 학반발표(2025학년도 3학년)" 형식
+                if '진급학년' in cell_str and '학반발표' in cell_str and re.search(r'\(\d+학년도\s+\d+학년\)', cell_str):
+                    # 괄호 안의 학년 정보를 previous_grade로 변경
+                    cell.value = re.sub(r'\((\d+)학년도\s+)\d+학년\)', rf'(\1{display_grade}학년)', cell_str)
+                    # 2025학년도 부분도 업데이트
+                    cell.value = str(cell.value).replace('2025학년도', f'{display_year}학년도')
+                    # 2026학년도 부분도 업데이트
+                    cell.value = str(cell.value).replace('2026학년도', f'{current_display_year}학년도')
                 # 2022를 2026으로 (진급반 년도)
                 if '2022' in cell_str and '진급반' in cell_str:
                     cell.value = cell_str.replace('2022', str(current_display_year))
