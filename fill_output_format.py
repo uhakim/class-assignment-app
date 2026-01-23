@@ -996,9 +996,9 @@ if '전체' in wb.sheetnames:
     ws = wb['전체']
     
     # 년도 업데이트 및 진급반 정보 채우기
-    # 제목: "2025학년도 {current_grade}학년" (이전 학년도 기준)
-    # 학년 표시는 학번 첫자리를 그대로 사용
-    display_grade = current_grade  # 학번 첫자리 (예: 학번이 3으로 시작하면 3학년)
+    # 제목: "2025학년도 {previous_grade}학년" (이전 학년도 기준)
+    # 하지만 "진급학년 학반발표" 제목의 괄호 안 학년만 학번 첫자리를 그대로 사용
+    display_grade = previous_grade  # 이전 학년 (학번 첫자리 - 1) - 일반적으로 사용
     display_year = previous_year  # 2025학년도 (이전 학년도)
     current_display_year = current_year  # 2026학년도 (현재 학년도)
     
@@ -1019,10 +1019,10 @@ if '전체' in wb.sheetnames:
             if cell.value and isinstance(cell.value, str):
                 cell_str = str(cell.value)
                 # 진급학년 학반발표 제목 패턴: "2026학년도 진급학년 학반발표(2025학년도 3학년)" 형식
-                # 괄호 안의 학년 정보를 previous_grade로 동적 변경
+                # 괄호 안의 학년 정보만 학번 첫자리(current_grade)를 그대로 사용
                 if '진급학년' in cell_str and '학반발표' in cell_str:
-                    # 괄호 안의 학년 정보를 previous_grade로 변경 (정규표현식으로 숫자 학년 찾기)
-                    cell.value = re.sub(r'\((\d+)학년도\s+)(\d+)학년\)', rf'(\1{display_grade}학년)', cell_str)
+                    # 괄호 안의 학년 정보를 current_grade(학번 첫자리)로 변경 (정규표현식으로 숫자 학년 찾기)
+                    cell.value = re.sub(r'\((\d+)학년도\s+)(\d+)학년\)', rf'(\1{current_grade}학년)', cell_str)
                     # 2025학년도 부분도 업데이트
                     if '2025학년도' in str(cell.value):
                         cell.value = str(cell.value).replace('2025학년도', f'{display_year}학년도')
