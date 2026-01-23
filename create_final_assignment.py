@@ -1253,36 +1253,37 @@ for col_idx, header in enumerate(summary_headers, 1):
     cell.border = border_style
 current_row += 1
 
-# 실제 배정된 학생 수 계산 및 검증
-total_actual_male = 0
-total_actual_female = 0
-total_actual = 0
+# transfer_plan 기반으로 각 반별 합계 계산 (각 이전학반별 테이블의 D열, T열 합계)
+total_planned_male = 0
+total_planned_female = 0
+total_planned = 0
 
 for target in target_classes:
-    # 실제 배정된 학생 수 사용 (class_assignments 기준)
-    actual_male = len(class_assignments[target]['male'])
-    actual_female = len(class_assignments[target]['female'])
-    actual_total = actual_male + actual_female
+    # transfer_plan에서 각 반별로 모든 이전학반에서 오는 학생 수 합계
+    # (각 이전학반별 테이블의 D열, T열 값들의 합계)
+    planned_male = sum(transfer_plan[prev_class]['male'][target] for prev_class in previous_classes)
+    planned_female = sum(transfer_plan[prev_class]['female'][target] for prev_class in previous_classes)
+    planned_total = planned_male + planned_female
+    
+    total_planned_male += planned_male
+    total_planned_female += planned_female
+    total_planned += planned_total
     
     # 목표 인원수와 비교
     target_male = target_distribution['male'][target]
     target_female = target_distribution['female'][target]
     target_total = target_distribution['total'][target]
     
-    total_actual_male += actual_male
-    total_actual_female += actual_female
-    total_actual += actual_total
-    
     # 불일치 시 경고 출력
-    if actual_male != target_male or actual_female != target_female:
-        print(f"[경고] {target}반: 실제 {actual_total}명 (남 {actual_male}, 여 {actual_female}) != 목표 {target_total}명 (남 {target_male}, 여 {target_female})")
+    if planned_male != target_male or planned_female != target_female:
+        print(f"[경고] {target}반: transfer_plan 합계 {planned_total}명 (남 {planned_male}, 여 {planned_female}) != 목표 {target_total}명 (남 {target_male}, 여 {target_female})")
     
     ws.cell(row=current_row, column=1).value = f"{target}반"
     ws.cell(row=current_row, column=1).fill = colors[target]
     ws.cell(row=current_row, column=1).font = Font(bold=True)
-    ws.cell(row=current_row, column=2).value = actual_male
-    ws.cell(row=current_row, column=3).value = actual_female
-    ws.cell(row=current_row, column=4).value = actual_total
+    ws.cell(row=current_row, column=2).value = planned_male
+    ws.cell(row=current_row, column=3).value = planned_female
+    ws.cell(row=current_row, column=4).value = planned_total
     ws.cell(row=current_row, column=4).font = Font(bold=True)
     
     for col in range(1, 5):
@@ -1299,11 +1300,11 @@ for col_idx, header in enumerate(summary_headers_with_total, 1):
     if col_idx == 1:
         cell.value = "합계"
     elif col_idx == 2:
-        cell.value = total_actual_male
+        cell.value = total_planned_male
     elif col_idx == 3:
-        cell.value = total_actual_female
+        cell.value = total_planned_female
     elif col_idx == 4:
-        cell.value = total_actual
+        cell.value = total_planned
     cell.fill = header_fill
     cell.font = Font(bold=True)
     cell.alignment = center_align
@@ -1311,13 +1312,13 @@ for col_idx, header in enumerate(summary_headers_with_total, 1):
 
 # 검증 출력
 print(f"\n[최종 반별 구성 요약 검증]")
-print(f"실제 배정 합계: 총 {total_actual}명 (남 {total_actual_male}명, 여 {total_actual_female}명)")
+print(f"transfer_plan 합계: 총 {total_planned}명 (남 {total_planned_male}명, 여 {total_planned_female}명)")
 print(f"목표 합계: 총 {total_students}명 (남 {male_count}명, 여 {female_count}명)")
-if total_actual == total_students and total_actual_male == male_count and total_actual_female == female_count:
+if total_planned == total_students and total_planned_male == male_count and total_planned_female == female_count:
     print("✓ 모든 숫자가 일치합니다!")
 else:
     print("✗ 숫자가 일치하지 않습니다!")
-    print(f"  차이: 총 {total_actual - total_students}명, 남 {total_actual_male - male_count}명, 여 {total_actual_female - female_count}명")
+    print(f"  차이: 총 {total_planned - total_students}명, 남 {total_planned_male - male_count}명, 여 {total_planned_female - female_count}명")
 
 # 열 너비 조정
 for col in ['A', 'B', 'Q', 'R']:
