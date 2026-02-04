@@ -1188,7 +1188,7 @@ else:
 
 # 수동 배정 필요한 학생 명단
 current_row += 2
-ws.merge_cells(f'A{current_row}:D{current_row}')
+ws.merge_cells(f'A{current_row}:G{current_row}')
 manual_header = ws[f'A{current_row}']
 manual_header.value = "수동 배정 필요한 학생 명단 (separation.xlsx에 없는 학생)"
 manual_header.font = Font(bold=True, size=14)
@@ -1196,7 +1196,7 @@ manual_header.fill = header_fill
 current_row += 1
 
 if len(df_manual_students) > 0:
-    headers = ['학번', '이름', '이전학반', '남녀']
+    headers = ['학번', '이름', '이전학반', '남녀', '중국어/일본어', '영어반', '성적']
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=current_row, column=col_idx)
         cell.value = header
@@ -1212,14 +1212,32 @@ if len(df_manual_students) > 0:
         ws.cell(row=current_row, column=3).value = student['이전학반']
         ws.cell(row=current_row, column=4).value = student['남녀']
         
-        for col in range(1, 5):
+        # 제2외국어 (중국어/일본어)
+        try:
+            ws.cell(row=current_row, column=5).value = student['제2외국어'] if pd.notna(student['제2외국어']) else ''
+        except:
+            ws.cell(row=current_row, column=5).value = ''
+        
+        # 영어반
+        try:
+            ws.cell(row=current_row, column=6).value = student['영어반'] if pd.notna(student['영어반']) else ''
+        except:
+            ws.cell(row=current_row, column=6).value = ''
+        
+        # 학력수준 (성적)
+        try:
+            ws.cell(row=current_row, column=7).value = student['학력수준'] if pd.notna(student['학력수준']) else ''
+        except:
+            ws.cell(row=current_row, column=7).value = ''
+        
+        for col in range(1, 8):
             cell = ws.cell(row=current_row, column=col)
             cell.border = border_style
             cell.alignment = center_align
         
         current_row += 1
 else:
-    ws.merge_cells(f'A{current_row}:D{current_row}')
+    ws.merge_cells(f'A{current_row}:G{current_row}')
     cell = ws[f'A{current_row}']
     cell.value = "수동 배정 필요한 학생 없음"
     cell.alignment = center_align
