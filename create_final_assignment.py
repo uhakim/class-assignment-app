@@ -556,7 +556,8 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                 remaining_female.append(student)
     
     # 남은 학생들을 여러 번 반복하여 최적 배정 시도
-    for iteration in range(10):  # 최대 10번 반복 (미배정 학생 해결을 위해 증가)
+    max_remaining_iterations = 30  # 최대 30번 반복 (미배정 학생 해결을 위해 증가)
+    for iteration in range(max_remaining_iterations):
         remaining_male.sort(key=lambda s: (-frequency.get(s['학번'], 0), random.random()))
         remaining_female.sort(key=lambda s: (-frequency.get(s['학번'], 0), random.random()))
         
@@ -648,6 +649,36 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
     
     # 미배정 학생 수 계산
     unassigned_count = len(remaining_male) + len(remaining_female)
+    
+    # 미배정 학생 디버깅 정보 출력 (첫 시도에서만)
+    if unassigned_count > 0 and random_seed == BASE_SEED:
+        print(f"\n[디버깅] 미배정 학생 {unassigned_count}명:")
+        for student in remaining_male[:5]:
+            student_id = student['학번']
+            prev_class = student['이전학반']
+            sep_count = len(separation_graph.get(student_id, []))
+            targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+            print(f"  - {student['이름']} ({student_id}, 이전학반 {prev_class}반): 분리대상 {sep_count}명, 배정가능반 {targets_for_prev}")
+            # 각 반에 분리대상이 몇 명 있는지 확인
+            if student_id in separation_graph:
+                for target in targets_for_prev:
+                    assigned_in_target = [s['학번'] for s in class_assignments[target]['male'] + class_assignments[target]['female']]
+                    blocked_by = [sid for sid in separation_graph[student_id] if sid in assigned_in_target]
+                    if blocked_by:
+                        print(f"    {target}반: 분리대상 {len(blocked_by)}명 배정됨 (배정 불가)")
+        for student in remaining_female[:5]:
+            student_id = student['학번']
+            prev_class = student['이전학반']
+            sep_count = len(separation_graph.get(student_id, []))
+            targets_for_prev = allowed_targets_map[prev_class] if allowed_targets_map else target_classes
+            print(f"  - {student['이름']} ({student_id}, 이전학반 {prev_class}반): 분리대상 {sep_count}명, 배정가능반 {targets_for_prev}")
+            # 각 반에 분리대상이 몇 명 있는지 확인
+            if student_id in separation_graph:
+                for target in targets_for_prev:
+                    assigned_in_target = [s['학번'] for s in class_assignments[target]['male'] + class_assignments[target]['female']]
+                    blocked_by = [sid for sid in separation_graph[student_id] if sid in assigned_in_target]
+                    if blocked_by:
+                        print(f"    {target}반: 분리대상 {len(blocked_by)}명 배정됨 (배정 불가)")
     
     # 분리 규칙 위반 확인
     violations = []
