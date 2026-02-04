@@ -963,7 +963,6 @@ for target in target_classes:
     print(f"{target}반: 실제 {actual_total}명 (남 {actual_male}명, 여 {actual_female}명) / 목표 {target_total}명 (남 {target_male}명, 여 {target_female}명) {match_status}")
 
 # 배정되지 않은 학생(범용) 확인
-print("\n배정되지 않은 학생 확인:")
 assigned_ids = set()
 for target in target_classes:
     for student in class_assignments[target]['male'] + class_assignments[target]['female']:
@@ -973,15 +972,39 @@ all_student_ids = set(df_students['학번'].tolist())
 unassigned_ids = sorted(list(all_student_ids - assigned_ids))
 
 if unassigned_ids:
-    print(f"  배정되지 않은 학생: {len(unassigned_ids)}명")
+    print("\n" + "!" * 80)
+    print("!" * 80)
+    print(f"!!!!! 경고: 배정되지 않은 학생 {len(unassigned_ids)}명 발견 !!!!!")
+    print("!" * 80)
+    print("!" * 80)
+    print("\n미배정 학생 목록:")
     unassigned_students = df_students[df_students['학번'].isin(unassigned_ids)].to_dict('records')
-    # 너무 길어지지 않게 최대 20명만 출력
-    for s in unassigned_students[:20]:
-        print(f"    - {s.get('이름','')} ({s.get('학번','')}) - {s.get('이전학반','')}반")
-    if len(unassigned_students) > 20:
-        print("    ... (이하 생략)")
+    for s in unassigned_students:
+        student_id = s.get('학번','')
+        student_name = s.get('이름','')
+        prev_class = s.get('이전학반','')
+        
+        # 분리대상 확인
+        if student_id in separation_graph:
+            sep_list = separation_graph[student_id]
+            sep_names = []
+            for sep_id in sep_list:
+                sep_student = df_students[df_students['학번'] == sep_id]
+                if not sep_student.empty:
+                    sep_names.append(f"{sep_student.iloc[0]['이름']}({sep_id})")
+            print(f"  - {student_name} ({student_id}, {prev_class}반) - 분리대상 {len(sep_list)}명: {', '.join(sep_names)}")
+        else:
+            print(f"  - {student_name} ({student_id}, {prev_class}반) - 분리대상 없음")
+    
+    print("\n" + "!" * 80)
+    print("분리규칙을 모두 만족하면서 배정할 수 없는 상태입니다.")
+    print("해결 방법:")
+    print("1. 분리명부에서 일부 분리규칙을 제거")
+    print("2. 프로그램을 다시 실행하여 다른 배정 시도 (랜덤 시드 변경)")
+    print("!" * 80 + "\n")
 else:
-    print("  모든 학생이 배정되었습니다!")
+    print("\n배정되지 않은 학생 확인:")
+    print("  [OK] 모든 학생이 배정되었습니다!")
 
 print(f"\n분리 규칙 위반: {len(violations)}개")
 if len(violations) > 0:
@@ -1401,3 +1424,11 @@ if len(violations) > 0:
     print(f"\n위반 분석:")
     for v in violations:
         print(f"  {v['학생1']['이름']} - {v['학생2']['이름']} ({v['반']}반): 위반")
+
+# 미배정 학생이 있으면 오류 코드로 종료
+if unassigned_ids:
+    print("\n" + "!" * 80)
+    print(f"프로그램 종료: {len(unassigned_ids)}명의 학생이 배정되지 않았습니다.")
+    print("!" * 80)
+    import sys
+    sys.exit(1)

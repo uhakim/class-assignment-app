@@ -188,8 +188,13 @@ elif st.session_state.step == 2:
                             )
 
                             if result.returncode != 0:
-                                st.error(f"배정표 생성 중 오류 발생:\n{result.stderr}")
-                                raise Exception(f"배정표 생성 실패: {result.stderr}")
+                                error_msg = result.stderr if result.stderr else result.stdout
+                                st.error(f"배정표 생성 중 오류 발생:\n{error_msg}")
+                                # stdout도 표시 (미배정 학생 정보 등)
+                                if result.stdout and "배정되지 않은 학생" in result.stdout:
+                                    st.warning("⚠️ 자세한 오류 정보:")
+                                    st.code(result.stdout, language="text")
+                                raise Exception(f"배정표 생성 실패: {error_msg}")
 
                             output_file = "반편성_배정표.xlsx"
 
