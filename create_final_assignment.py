@@ -546,17 +546,103 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
     # 미배정 학생이 있거나 분리 규칙 위반이 있으면 반환
     return len(violations), unassigned_count
 
-# ======== 기존 코드 제거: 아래부터는 실행되지 않음 ========
-if False:
-    # 각 반별로 분리 규칙을 만족하는지 확인하고 점수 계산
-    candidates = []
+# 여러 번 시도하여 분리 규칙 위반이 0개인 배정 찾기
+print("=" * 80)
+print("학생 배정 시도 중 (우선순위 기반 재배정)")
+print("1단계: 빈도(분리대상) 높은 순으로 배정")
+print("2단계: 실패 학생을 최우선으로 이동 후 재배정 반복")
+print("=" * 80)
+
+best_assignments = None
+best_violation_count = float('inf')
+best_unassigned_count = float('inf')
+max_attempts = 500  # 최대 500번 시도 (MRV 휴리스틱 적용으로 더 많은 시도 가능)
+
+for attempt in range(max_attempts):
+    # 배정 초기화
+    class_assignments = {
+        'A': {'male': [], 'female': []},
+        'B': {'male': [], 'female': []},
+        'C': {'male': [], 'female': []},
+        'D': {'male': [], 'female': []}
+    }
     
-    for target in targets_for_prev:
-                needed = male_transfers[target]
-                current = len([s for s in class_assignments[target]['male'] if s['이전학반'] == prev_class])
-                
-                # transfer_plan을 초과하지 않도록
-                if current >= needed:
+    violation_count, unassigned_count = assign_students_with_retry(
+        class_assignments, df_separation_students, separation_graph, transfer_plan,
+        target_distribution, df_students, previous_classes, target_classes,
+        frequency, separation_student_ids, random_seed=(BASE_SEED + attempt),
+        allowed_targets_map=ALLOWED_TARGETS_3반 if ASSIGN_MODE == "3반" else None
+    )
+    
+    # 미배정 학생이 없고 위반도 적은 배정을 우선
+    # 미배정 학생이 있으면 큰 페널티 부여 (미배정 1명 = 위반 1000개로 취급)
+    effective_score = violation_count + (unassigned_count * 1000)
+    current_best_score = best_violation_count + (best_unassigned_count * 1000) if best_assignments else float('inf')
+    
+    if effective_score < current_best_score:
+        best_violation_count = violation_count
+        best_unassigned_count = unassigned_count
+        # 딥카피로 저장
+        import copy
+        best_assignments = copy.deepcopy(class_assignments)
+        
+        if unassigned_count > 0:
+            print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개, 미배정 {unassigned_count}명 (최선 기록)")
+        else:
+            print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개, 모든 학생 배정 완료 (최선 기록)")
+        
+        # 위반이 0개이고 미배정도 없으면 즉시 중단
+        if violation_count == 0 and unassigned_count == 0:
+            print(f"완벽한 배정을 찾았습니다! (시도 {attempt + 1}회)")
+            break
+    elif attempt % 20 == 0:
+        if unassigned_count > 0:
+            print(f"시도 {attempt + 1}: 위반 {violation_count}개, 미배정 {unassigned_count}명 (최선: 위반 {best_violation_count}개, 미배정 {best_unassigned_count}명)")
+        else:
+            print(f"시도 {attempt + 1}: 위반 {violation_count}개 (최선: 위반 {best_violation_count}개)")
+
+# 미배정 학생이 있으면 경고 출력
+if best_unassigned_count > 0:
+    print(f"\n[경고] 최선의 배정에서도 {best_unassigned_count}명의 학생이 배정되지 않았습니다.")
+    print("분리규칙을 모두 만족하면서 배정할 수 없는 상태입니다.")
+
+# 최선의 배정 사용
+if best_assignments:
+    class_assignments = best_assignments
+else:
+    print("\n[오류] 유효한 배정을 찾지 못했습니다.")
+    import sys
+    sys.exit(1)
+
+print(f"\n최종 선택: 분리 규칙 위반 {best_violation_count}개, 미배정 {best_unassigned_count}명")
+print("=" * 80)
+
+# 분리 규칙 위반 확인 (최종)
+violations = []
+violation_pairs = {}
+
+for target in target_classes:
+    all_students = class_assignments[target]['male'] + class_assignments[target]['female']
+    student_ids = [s['학번'] for s in all_students]
+    
+    for i, student1 in enumerate(all_students):
+        id1 = student1['학번']
+        if id1 in separation_graph:
+            for separated_id in separation_graph[id1]:
+                if separated_id in student_ids:
+                    student2 = next(s for s in all_students if s['학번'] == separated_id)
+                    pair_key = tuple(sorted([id1, separated_id]))
+                    
+                    if pair_key not in violation_pairs:
+                        violation_pairs[pair_key] = {
+                            '반': target,
+                            '학생1': {'학번': id1, '이름': student1['이름']},
+                            '학생2': {'학번': separated_id, '이름': student2['이름']}
+                        }
+                        violations.append(violation_pairs[pair_key])
+
+# 위반이 불가피한지 확인
+def check_if_violation_inevitable(violation, class_assignments, transfer_plan, separation_graph, target_classes):
                     continue
                 
                 # 분리 규칙 확인
