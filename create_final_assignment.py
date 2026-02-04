@@ -556,7 +556,7 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                 remaining_female.append(student)
     
     # 남은 학생들을 여러 번 반복하여 최적 배정 시도
-    for iteration in range(3):  # 최대 3번 반복
+    for iteration in range(10):  # 최대 10번 반복 (미배정 학생 해결을 위해 증가)
         remaining_male.sort(key=lambda s: (-frequency.get(s['학번'], 0), random.random()))
         remaining_female.sort(key=lambda s: (-frequency.get(s['학번'], 0), random.random()))
         
@@ -646,6 +646,9 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
         if not remaining_male and not remaining_female:
             break
     
+    # 미배정 학생 수 계산
+    unassigned_count = len(remaining_male) + len(remaining_female)
+    
     # 분리 규칙 위반 확인
     violations = []
     violation_pairs = {}
@@ -670,7 +673,8 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                             }
                             violations.append(violation_pairs[pair_key])
     
-    return len(violations)
+    # 미배정 학생이 있으면 (위반수, 미배정수) 반환, 없으면 (위반수, 0) 반환
+    return len(violations), unassigned_count
 
 # 여러 번 시도하여 분리 규칙 위반이 0개인 배정 찾기
 print("=" * 80)
@@ -679,7 +683,8 @@ print("=" * 80)
 
 best_assignments = None
 best_violation_count = float('inf')
-max_attempts = 50  # 최대 50번 시도
+best_unassigned_count = float('inf')
+max_attempts = 200  # 최대 200번 시도 (미배정 학생 해결을 위해 증가)
 
 for attempt in range(max_attempts):
     # 배정 초기화
@@ -690,26 +695,44 @@ for attempt in range(max_attempts):
         'D': {'male': [], 'female': []}
     }
     
-    violation_count = assign_students_with_retry(
+    violation_count, unassigned_count = assign_students_with_retry(
         class_assignments, df_separation_students, separation_graph, transfer_plan,
         target_distribution, df_students, previous_classes, target_classes,
         frequency, separation_student_ids, random_seed=(BASE_SEED + attempt),
         allowed_targets_map=ALLOWED_TARGETS_3반 if ASSIGN_MODE == "3반" else None
     )
     
-    if violation_count < best_violation_count:
+    # 미배정 학생이 없고 위반도 적은 배정을 우선
+    # 미배정 학생이 있으면 큰 페널티 부여 (미배정 1명 = 위반 1000개로 취급)
+    effective_score = violation_count + (unassigned_count * 1000)
+    current_best_score = best_violation_count + (best_unassigned_count * 1000) if best_assignments else float('inf')
+    
+    if effective_score < current_best_score:
         best_violation_count = violation_count
+        best_unassigned_count = unassigned_count
         # 딥카피로 저장
         import copy
         best_assignments = copy.deepcopy(class_assignments)
-        print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개 (최선 기록)")
         
-        # 위반이 0개면 즉시 중단
-        if violation_count == 0:
+        if unassigned_count > 0:
+            print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개, 미배정 {unassigned_count}명 (최선 기록)")
+        else:
+            print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개, 모든 학생 배정 완료 (최선 기록)")
+        
+        # 위반이 0개이고 미배정도 없으면 즉시 중단
+        if violation_count == 0 and unassigned_count == 0:
             print(f"완벽한 배정을 찾았습니다! (시도 {attempt + 1}회)")
             break
-    elif attempt % 10 == 0:
-        print(f"시도 {attempt + 1}: 분리 규칙 위반 {violation_count}개 (최선: {best_violation_count}개)")
+    elif attempt % 20 == 0:
+        if unassigned_count > 0:
+            print(f"시도 {attempt + 1}: 위반 {violation_count}개, 미배정 {unassigned_count}명 (최선: 위반 {best_violation_count}개, 미배정 {best_unassigned_count}명)")
+        else:
+            print(f"시도 {attempt + 1}: 위반 {violation_count}개 (최선: 위반 {best_violation_count}개)")
+
+# 미배정 학생이 있으면 경고 출력
+if best_unassigned_count > 0:
+    print(f"\n[경고] 최선의 배정에서도 {best_unassigned_count}명의 학생이 배정되지 않았습니다.")
+    print("분리규칙을 모두 만족하면서 배정할 수 없는 상태입니다.")
 
 # 최선의 배정 사용
 if best_assignments:
