@@ -643,12 +643,59 @@ for target in target_classes:
 
 # 위반이 불가피한지 확인
 def check_if_violation_inevitable(violation, class_assignments, transfer_plan, separation_graph, target_classes):
-                    continue
-                
-                # 분리 규칙 확인
+    """
+    위반이 불가피한지 확인
+    두 학생을 다른 반으로 옮길 수 있는지 확인
+    """
+    id1 = violation['학생1']['학번']
+    id2 = violation['학생2']['학번']
+    current_target = violation['반']
+    
+    # 학생1의 이전학반과 성별 찾기
+    prev_class1 = None
+    gender1 = None
+    for target in target_classes:
+        for student in class_assignments[target]['male'] + class_assignments[target]['female']:
+            if student['학번'] == id1:
+                prev_class1 = student['이전학반']
+                gender1 = student['남녀']
+                break
+        if prev_class1:
+            break
+    
+    # 학생2의 이전학반과 성별 찾기
+    prev_class2 = None
+    gender2 = None
+    for target in target_classes:
+        for student in class_assignments[target]['male'] + class_assignments[target]['female']:
+            if student['학번'] == id2:
+                prev_class2 = student['이전학반']
+                gender2 = student['남녀']
+                break
+        if prev_class2:
+            break
+    
+    # 다른 반으로 옮길 수 있는지 확인
+    can_move_student1 = False
+    can_move_student2 = False
+    
+    for target in target_classes:
+        if target == current_target:
+            continue
+        
+        # 학생1을 옮길 수 있는지 확인
+        if prev_class1:
+            needed1 = transfer_plan[prev_class1]['male' if gender1 == '남' else 'female'][target]
+            current1 = len([s for s in class_assignments[target]['male' if gender1 == '남' else 'female'] 
+                           if s['이전학반'] == prev_class1])
+            
+            if current1 < needed1:
+                # 분리 규칙 확인 (학생2는 제외)
                 can_assign = True
-                if student_id in separation_graph:
-                    for separated_id in separation_graph[student_id]:
+                if id1 in separation_graph:
+                    for separated_id in separation_graph[id1]:
+                        if separated_id == id2:  # 학생2는 이미 같은 반이므로 체크 안 함
+                            continue
                         for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
                             if assigned_student['학번'] == separated_id:
                                 can_assign = False
@@ -656,15 +703,171 @@ def check_if_violation_inevitable(violation, class_assignments, transfer_plan, s
                         if not can_assign:
                             break
                 
-                if not can_assign:
-                    continue
-                
-                # 분리 규칙을 만족하는 경우만 후보에 추가
-                score = calculate_assignment_score(student, target, class_assignments, transfer_plan, prev_class, target_distribution, df_students, '남')
-                candidates.append((score, target, 0))
+                if can_assign:
+                    can_move_student1 = True
+        
+        # 학생2를 옮길 수 있는지 확인
+        if prev_class2:
+            needed2 = transfer_plan[prev_class2]['male' if gender2 == '남' else 'female'][target]
+            current2 = len([s for s in class_assignments[target]['male' if gender2 == '남' else 'female'] 
+                           if s['이전학반'] == prev_class2])
             
-            # 분리 규칙을 만족하는 반에만 배정 (위반 시 배정하지 않음)
-            best_target = None
+            if current2 < needed2:
+                can_assign = True
+                if id2 in separation_graph:
+                    for separated_id in separation_graph[id2]:
+                        if separated_id == id1:  # 학생1은 이미 같은 반이므로 체크 안 함
+                            continue
+                        for assigned_student in class_assignments[target]['male'] + class_assignments[target]['female']:
+                            if assigned_student['학번'] == separated_id:
+                                can_assign = False
+                                break
+                        if not can_assign:
+                            break
+                
+                if can_assign:
+                    can_move_student2 = True
+    
+    # 둘 다 옮길 수 없으면 불가피한 위반
+    return not (can_move_student1 or can_move_student2)
+
+# 위반 그룹 생성
+violation_groups = []
+student_to_group = {}
+
+for pair_key, violation in violation_pairs.items():
+    id1, id2 = pair_key
+    
+    group1 = student_to_group.get(id1)
+    group2 = student_to_group.get(id2)
+    
+    if group1 is None and group2 is None:
+        new_group_id = len(violation_groups)
+        violation_groups.append({id1, id2})
+        student_to_group[id1] = new_group_id
+        student_to_group[id2] = new_group_id
+    elif group1 is not None and group2 is not None:
+        if group1 != group2:
+            violation_groups[group1].update(violation_groups[group2])
+            for student_id in violation_groups[group2]:
+                student_to_group[student_id] = group1
+            violation_groups[group2] = None
+    elif group1 is not None:
+        violation_groups[group1].add(id2)
+        student_to_group[id2] = group1
+    else:
+        violation_groups[group2].add(id1)
+        student_to_group[id1] = group2
+
+violation_groups = [g for g in violation_groups if g is not None]
+
+# 위반 그룹별 색상
+violation_colors = [
+    'FF0000', '0000FF', '008000', 'FF00FF', 'FFA500',
+    '800080', '008080', 'FF1493', '00CED1', 'FF4500',
+]
+
+violation_color_map = {}
+for group_id, group in enumerate(violation_groups):
+    color = violation_colors[group_id % len(violation_colors)]
+    for student_id in group:
+        violation_color_map[student_id] = color
+
+for violation in violations:
+    id1 = violation['학생1']['학번']
+    violation['group_id'] = student_to_group.get(id1, -1)
+
+print("=" * 80)
+print("배정 결과 요약")
+print("=" * 80)
+for target in target_classes:
+    actual_male = len(class_assignments[target]['male'])
+    actual_female = len(class_assignments[target]['female'])
+    actual_total = actual_male + actual_female
+    target_male = target_distribution['male'][target]
+    target_female = target_distribution['female'][target]
+    target_total = target_distribution['total'][target]
+    match_status = "[OK]" if (actual_male == target_male and actual_female == target_female) else "[X]"
+    print(f"{target}반: 실제 {actual_total}명 (남 {actual_male}명, 여 {actual_female}명) / 목표 {target_total}명 (남 {target_male}명, 여 {target_female}명) {match_status}")
+
+# 배정되지 않은 학생(범용) 확인
+assigned_ids = set()
+for target in target_classes:
+    for student in class_assignments[target]['male'] + class_assignments[target]['female']:
+        assigned_ids.add(student['학번'])
+
+all_student_ids = set(df_students['학번'].tolist())
+unassigned_ids = sorted(list(all_student_ids - assigned_ids))
+
+if unassigned_ids:
+    print("\n" + "!" * 80)
+    print("!" * 80)
+    print(f"!!!!! 경고: 배정되지 않은 학생 {len(unassigned_ids)}명 발견 !!!!!")
+    print("!" * 80)
+    print("!" * 80)
+    print("\n미배정 학생 목록:")
+    unassigned_students = df_students[df_students['학번'].isin(unassigned_ids)].to_dict('records')
+    for s in unassigned_students:
+        student_id = s.get('학번','')
+        student_name = s.get('이름','')
+        prev_class = s.get('이전학반','')
+        
+        # 분리대상 확인
+        if student_id in separation_graph:
+            sep_list = separation_graph[student_id]
+            sep_names = []
+            for sep_id in sep_list:
+                sep_student = df_students[df_students['학번'] == sep_id]
+                if not sep_student.empty:
+                    sep_names.append(f"{sep_student.iloc[0]['이름']}({sep_id})")
+            print(f"  - {student_name} ({student_id}, {prev_class}반) - 분리대상 {len(sep_list)}명: {', '.join(sep_names)}")
+        else:
+            print(f"  - {student_name} ({student_id}, {prev_class}반) - 분리대상 없음")
+    
+    print("\n" + "!" * 80)
+    print("분리규칙을 모두 만족하면서 배정할 수 없는 상태입니다.")
+    print("해결 방법:")
+    print("1. 분리명부에서 일부 분리규칙을 제거")
+    print("2. 프로그램을 다시 실행하여 다른 배정 시도 (랜덤 시드 변경)")
+    print("!" * 80 + "\n")
+else:
+    print("\n배정되지 않은 학생 확인:")
+    print("  [OK] 모든 학생이 배정되었습니다!")
+
+print(f"\n분리 규칙 위반: {len(violations)}개")
+if len(violations) > 0:
+    print("위반한 학생 쌍:")
+    for v in violations:
+        print(f"  - {v['학생1']['이름']} - {v['학생2']['이름']} ({v['반']}반)")
+print(f"수동 배정 필요한 학생: {len(df_manual_students)}명")
+
+# 엑셀 파일 생성
+wb = Workbook()
+ws = wb.active
+ws.title = "반편성 배정표"
+
+colors = {
+    'A': PatternFill(start_color='92D050', end_color='92D050', fill_type='solid'),
+    'B': PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid'),
+    'C': PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid'),
+    'D': PatternFill(start_color='FF7C80', end_color='FF7C80', fill_type='solid')
+}
+
+header_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
+header_font = Font(bold=True)
+center_align = Alignment(horizontal='center', vertical='center')
+border_style = Border(
+    left=Side(style='thin'),
+    right=Side(style='thin'),
+    top=Side(style='thin'),
+    bottom=Side(style='thin')
+)
+
+# 이하 원래 엑셀 생성 코드 계속...
+# 죽은 코드는 제거되고 여기서부터는 정상 코드
+
+if False:  # 임시로 건너뛰기
+    best_target = None
             if candidates:
                 candidates.sort(key=lambda x: x[0])
                 best_target = candidates[0][1]
