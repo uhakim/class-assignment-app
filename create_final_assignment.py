@@ -404,7 +404,7 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                                 frequency, separation_student_ids, random_seed=None, allowed_targets_map=None):
     """
     학생 배정을 시도하고, 분리 규칙 위반 수를 반환
-    MRV(Minimum Remaining Values) 휴리스틱 적용: 배정 가능한 반이 적은 학생부터 우선 배정
+    우선순위 기반 배정: 빈도 높은 순 → 실패 시 실패 학생 최우선으로 재배정
     allowed_targets_map: 3반 편성 시 이전학반별 배정 가능 반 (None이면 4반 자유 배정)
     """
     if random_seed is not None:
@@ -429,16 +429,16 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
                 '이전학반': row['이전학반']
             })
     
-    # MRV 방식으로 학생 배정: 배정 가능한 반이 적은 학생부터 우선 배정
-    assigned_count = 0
-    max_iterations = len(all_students_to_assign) * 10  # 무한 루프 방지
-    iteration = 0
+    # 1차: 빈도(분리대상) 높은 순으로 정렬
+    all_students_to_assign.sort(key=lambda s: (-frequency.get(s['학번'], 0), random.random()))
     
-    while all_students_to_assign and iteration < max_iterations:
-        iteration += 1
+    # 반복 배정: 실패한 학생을 맨 앞으로 이동하면서 시도
+    max_retry = 20  # 최대 20번 재정렬 시도
+    for retry_count in range(max_retry):
+        failed_students = []
+        temp_assignments = {t: {'male': [], 'female': []} for t in target_classes}
         
-        # 각 학생의 배정 가능한 반 개수 계산
-        student_choices = []
+        # 현재 순서대로 배정 시도
         for student in all_students_to_assign:
             student_id = student['학번']
             prev_class = student['이전학반']
@@ -446,71 +446,61 @@ def assign_students_with_retry(class_assignments, df_separation_students, separa
             
             # 배정 가능한 반 목록
             available = get_available_targets(
-                student_id, prev_class, gender, class_assignments, 
+                student_id, prev_class, gender, temp_assignments, 
                 transfer_plan, separation_graph, target_classes, allowed_targets_map
             )
             
-            student_choices.append({
-                'student': student,
-                'available_count': len(available),
-                'available_targets': available,
-                'separation_count': len(separation_graph.get(student_id, []))
-            })
+            if not available:
+                # 배정 실패 → 실패 목록에 추가
+                failed_students.append(student)
+                continue
+            
+            # 가용한 반 중에서 점수가 가장 좋은 반 선택
+            best_target = None
+            best_score = float('inf')
+            
+            for target in available:
+                score = calculate_assignment_score(
+                    student, target, temp_assignments, transfer_plan, 
+                    prev_class, target_distribution, df_students, student['남녀']
+                )
+                if score < best_score:
+                    best_score = score
+                    best_target = target
+            
+            # 배정 실행
+            if best_target:
+                temp_assignments[best_target][gender].append(student)
+            else:
+                failed_students.append(student)
         
-        if not student_choices:
+        # 실패한 학생이 없으면 성공
+        if not failed_students:
+            # 임시 배정을 실제 배정에 복사
+            for target in target_classes:
+                class_assignments[target]['male'] = temp_assignments[target]['male'][:]
+                class_assignments[target]['female'] = temp_assignments[target]['female'][:]
             break
         
-        # 선택지가 0인 학생이 있으면 즉시 실패 (조기 실패 감지)
-        if any(sc['available_count'] == 0 for sc in student_choices):
-            # 배정 불가능한 상황 발생 - 재시도 필요
-            return float('inf'), len(all_students_to_assign)
+        # 실패한 학생이 있으면 순서 재조정: 실패 학생 맨 앞 + 나머지
+        successfully_assigned = [s for s in all_students_to_assign if s not in failed_students]
+        all_students_to_assign = failed_students + successfully_assigned
         
-        # MRV: 선택지가 가장 적은 학생부터 배정
-        # 동점이면 분리대상이 많은 학생 우선, 그것도 같으면 랜덤
-        student_choices.sort(key=lambda sc: (
-            sc['available_count'],
-            -sc['separation_count'],
-            random.random()
-        ))
-        
-        # 가장 제약이 심한 학생 선택
-        chosen = student_choices[0]
-        student = chosen['student']
-        available_targets = chosen['available_targets']
-        
-        if not available_targets:
-            # 선택지가 없으면 재시도 필요
-            return float('inf'), len(all_students_to_assign)
-        
-        # 가용한 반 중에서 점수가 가장 좋은 반 선택
-        student_id = student['학번']
-        prev_class = student['이전학반']
-        gender = 'male' if student['남녀'] == '남' else 'female'
-        
-        best_target = None
-        best_score = float('inf')
-        
-        for target in available_targets:
-            score = calculate_assignment_score(
-                student, target, class_assignments, transfer_plan, 
-                prev_class, target_distribution, df_students, student['남녀']
-            )
-            if score < best_score:
-                best_score = score
-                best_target = target
-        
-        # 배정 실행
-        if best_target:
-            class_assignments[best_target][gender].append(student)
-            all_students_to_assign.remove(student)
-            assigned_count += 1
-        else:
-            # 이론적으로 여기 도달하면 안 됨
-            break
+        # 재시도 시 약간의 랜덤성 추가
+        random.shuffle(failed_students)
+        all_students_to_assign = failed_students + successfully_assigned
     
-    # 배정되지 않은 학생이 남았다면 재시도가 필요함을 알림
-    if all_students_to_assign:
-        return float('inf'), len(all_students_to_assign)
+    # 배정되지 않은 학생 수 계산
+    assigned_ids = set()
+    for target in target_classes:
+        for student in class_assignments[target]['male'] + class_assignments[target]['female']:
+            assigned_ids.add(student['학번'])
+    
+    all_ids = set(s['학번'] for s in all_students_to_assign)
+    unassigned_count = len(all_ids - assigned_ids)
+    
+    if unassigned_count > 0:
+        return float('inf'), unassigned_count
     
     # 이전 로직의 남은 부분 제거 (아래 코드는 더 이상 필요 없음)
     # 하지만 기존 로직과의 호환성을 위해 남은 학생 재배정 로직은 유지하지 않음
@@ -845,8 +835,9 @@ if False:
 
 # 여러 번 시도하여 분리 규칙 위반이 0개인 배정 찾기
 print("=" * 80)
-print("학생 배정 시도 중 (MRV 휴리스틱 적용)")
-print("MRV(Minimum Remaining Values): 배정 가능한 반이 적은 학생부터 우선 배정")
+print("학생 배정 시도 중 (우선순위 기반 재배정)")
+print("1단계: 빈도(분리대상) 높은 순으로 배정")
+print("2단계: 실패 학생을 최우선으로 이동 후 재배정 반복")
 print("=" * 80)
 
 best_assignments = None
