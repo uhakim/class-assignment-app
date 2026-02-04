@@ -928,7 +928,7 @@ for target in target_classes:
     target_male = target_distribution['male'][target]
     target_female = target_distribution['female'][target]
     target_total = target_distribution['total'][target]
-    match_status = "✓" if (actual_male == target_male and actual_female == target_female) else "✗"
+    match_status = "[OK]" if (actual_male == target_male and actual_female == target_female) else "[X]"
     print(f"{target}반: 실제 {actual_total}명 (남 {actual_male}명, 여 {actual_female}명) / 목표 {target_total}명 (남 {target_male}명, 여 {target_female}명) {match_status}")
 
 # 배정되지 않은 학생(범용) 확인
@@ -1338,9 +1338,9 @@ print(f"\n[최종 반별 구성 요약 검증]")
 print(f"transfer_plan 합계: 총 {total_planned}명 (남 {total_planned_male}명, 여 {total_planned_female}명)")
 print(f"목표 합계: 총 {total_students}명 (남 {male_count}명, 여 {female_count}명)")
 if total_planned == total_students and total_planned_male == male_count and total_planned_female == female_count:
-    print("✓ 모든 숫자가 일치합니다!")
+    print("[OK] 모든 숫자가 일치합니다!")
 else:
-    print("✗ 숫자가 일치하지 않습니다!")
+    print("[X] 숫자가 일치하지 않습니다!")
     print(f"  차이: 총 {total_planned - total_students}명, 남 {total_planned_male - male_count}명, 여 {total_planned_female - female_count}명")
 
 # 열 너비 조정
