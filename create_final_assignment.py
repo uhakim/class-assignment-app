@@ -866,11 +866,34 @@ border_style = Border(
 # 이하 원래 엑셀 생성 코드 계속...
 # 죽은 코드는 제거되고 여기서부터는 정상 코드
 
-if False:  # 임시로 건너뛰기
-    best_target = None
-            if candidates:
-                candidates.sort(key=lambda x: x[0])
-                best_target = candidates[0][1]
+# 엑셀 파일 생성
+wb = Workbook()
+ws = wb.active
+ws.title = "반편성 배정표"
+
+colors = {
+    'A': PatternFill(start_color='92D050', end_color='92D050', fill_type='solid'),
+    'B': PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid'),
+    'C': PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid'),
+    'D': PatternFill(start_color='FF7C80', end_color='FF7C80', fill_type='solid')
+}
+
+header_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
+header_font = Font(bold=True)
+center_align = Alignment(horizontal='center', vertical='center')
+border_style = Border(
+    left=Side(style='thin'),
+    right=Side(style='thin'),
+    top=Side(style='thin'),
+    bottom=Side(style='thin')
+)
+
+# 이하 원래 엑셀 코드 계속...
+
+current_row = 1
+
+# 각 이전학반별로 테이블 생성
+for prev_class in previous_classes:
                 class_assignments[best_target]['male'].append(student)
             # 만족하는 반이 없으면 배정하지 않음 → remaining으로 수집됨
         
