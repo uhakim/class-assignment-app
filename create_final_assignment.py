@@ -28,6 +28,9 @@ try:
     BASE_SEED = int(_seed_env) if _seed_env is not None else int(time.time())
 except Exception:
     BASE_SEED = int(time.time())
+
+# 제2외국어 추천 옵션 (환경변수 ENABLE_LANGUAGE_RECOMMENDATION)
+ENABLE_LANGUAGE_RECOMMENDATION = os.environ.get("ENABLE_LANGUAGE_RECOMMENDATION", "1") == "1"
 random.seed(BASE_SEED)
 print(f"[SEED] BASE_SEED={BASE_SEED} (재현 필요 시 PowerShell에서: $env:ASSIGN_SEED={BASE_SEED})")
 
@@ -37,6 +40,19 @@ print(f"[MODE] ASSIGN_MODE={ASSIGN_MODE} (4반: 자유 배정 / 3반: 선생님 
 # 데이터 읽기
 df_students = pd.read_excel('학생자료.xlsx', sheet_name=0)
 df_separation = pd.read_excel('separation.xlsx', sheet_name=0)
+
+# 학생 정보 딕셔너리 생성 (학번을 키로)
+student_info_dict = {}
+for _, row in df_students.iterrows():
+    student_id = str(row['학번'])
+    student_info_dict[student_id] = {
+        '이름': row['이름'],
+        '제2외국어': row.get('제2외국어', ''),
+        '이전학반': row.get('이전학반', ''),
+        '남녀': row.get('남녀', ''),
+        '학력수준': row.get('학력수준', ''),
+        '영어반': row.get('영어반', '')
+    }
 
 # 학번 첫자리에서 현재 학년 추출
 current_grade = 4  # 기본값
@@ -617,6 +633,220 @@ else:
 print(f"\n최종 선택: 분리 규칙 위반 {best_violation_count}개, 미배정 {best_unassigned_count}명")
 print("=" * 80)
 
+# ============================================================================
+# 제2외국어 통계 계산 (빈 칸 색깔 추천용)
+# ============================================================================
+
+if ENABLE_LANGUAGE_RECOMMENDATION:
+    print("\n" + "=" * 80)
+    print("제2외국어 통계")
+    print("=" * 80)
+    
+    # 1. 전체 학생의 제2외국어 통계
+    total_japanese = len(df_students[df_students['제2외국어'] == '일'])
+    total_chinese = len(df_students[df_students['제2외국어'] == '중'])
+    
+    print(f"전체 학생: {len(df_students)}명")
+    print(f"일본어: {total_japanese}명")
+    print(f"중국어: {total_chinese}명")
+
+    # 2. 각 반 목표 계산 (균등 분배)
+    def distribute_language(total_count, class_names):
+        """제2외국어를 각 반에 균등 분배"""
+        num_classes = len(class_names)
+        base = total_count // num_classes
+        remainder = total_count % num_classes
+        
+        distribution = {name: base for name in class_names}
+        for i in range(remainder):
+            distribution[class_names[i]] += 1
+        return distribution
+
+    japanese_distribution = distribute_language(total_japanese, target_classes)
+    chinese_distribution = distribute_language(total_chinese, target_classes)
+
+    target_language = {}
+    for target in target_classes:
+        target_language[target] = {
+            '일본어': japanese_distribution[target],
+            '중국어': chinese_distribution[target]
+        }
+
+    print("\n각 반 제2외국어 목표:")
+    for target in target_classes:
+        print(f"{target}반: 일본어 {target_language[target]['일본어']}명, 중국어 {target_language[target]['중국어']}명")
+
+    # 3. 현재 배정된 학생들의 제2외국어 통계
+    current_language = {target: {'일본어': 0, '중국어': 0} for target in target_classes}
+
+    for target in target_classes:
+        for student in class_assignments[target]['male'] + class_assignments[target]['female']:
+            student_id = str(student['학번'])  # 문자열로 변환
+            if student_id in student_info_dict:
+                lang = student_info_dict[student_id].get('제2외국어', '')
+                if pd.notna(lang):
+                    if '일' in str(lang):
+                        current_language[target]['일본어'] += 1
+                    elif '중' in str(lang):
+                        current_language[target]['중국어'] += 1
+
+    print("\n현재 배정 상황:")
+    for target in target_classes:
+        print(f"{target}반: 일본어 {current_language[target]['일본어']}명, 중국어 {current_language[target]['중국어']}명")
+
+    print("\n부족분:")
+    for target in target_classes:
+        japanese_need = target_language[target]['일본어'] - current_language[target]['일본어']
+        chinese_need = target_language[target]['중국어'] - current_language[target]['중국어']
+        print(f"{target}반: 일본어 {japanese_need:+d}명, 중국어 {chinese_need:+d}명")
+
+    # 4. 수동배정 학생의 이전학반별 제2외국어 구성
+    manual_language_stats = {}
+    for prev_class in previous_classes:
+        prev_manual = df_manual_students[df_manual_students['이전학반'] == prev_class]
+        
+        manual_language_stats[prev_class] = {
+            'male': {
+                '일본어': len(prev_manual[(prev_manual['남녀'] == '남') & (prev_manual['제2외국어'] == '일')]),
+                '중국어': len(prev_manual[(prev_manual['남녀'] == '남') & (prev_manual['제2외국어'] == '중')])
+            },
+            'female': {
+                '일본어': len(prev_manual[(prev_manual['남녀'] == '여') & (prev_manual['제2외국어'] == '일')]),
+                '중국어': len(prev_manual[(prev_manual['남녀'] == '여') & (prev_manual['제2외국어'] == '중')])
+            }
+        }
+
+    print("\n각 이전학반별 수동배정 학생 제2외국어 구성:")
+    for prev_class in previous_classes:
+        stats = manual_language_stats[prev_class]
+        print(f"{prev_class}반: 남(일{stats['male']['일본어']}, 중{stats['male']['중국어']}), " +
+              f"여(일{stats['female']['일본어']}, 중{stats['female']['중국어']})")
+
+    # 5. 각 이전학반별로 최적 배치 계산
+    print("\n" + "=" * 80)
+    print("제2외국어 최적 배치 계산")
+    print("=" * 80)
+
+    # 각 이전학반에서 각 목표반으로 가는 빈 칸에 대한 추천 저장
+    language_recommendations = {}
+
+    for prev_class in previous_classes:
+        language_recommendations[prev_class] = {}
+        
+        for gender in ['male', 'female']:
+            language_recommendations[prev_class][gender] = {}
+            
+            # 이 이전학반의 이 성별 수동배정 학생 수
+            gender_kr = '남' if gender == 'male' else '여'
+            available_japanese = manual_language_stats[prev_class][gender]['일본어']
+            available_chinese = manual_language_stats[prev_class][gender]['중국어']
+            total_available = available_japanese + available_chinese
+            
+            if total_available == 0:
+                continue
+            
+            # 이 이전학반에서 각 목표반으로 가는 빈 칸 수 계산
+            empty_slots = {}
+            for target in target_classes:
+                planned = transfer_plan[prev_class][gender][target]
+                assigned = len([s for s in class_assignments[target][gender] if s['이전학반'] == prev_class])
+                empty_slots[target] = planned - assigned
+            
+            total_empty = sum(empty_slots.values())
+            
+            print(f"\n{prev_class}반 {gender_kr}학생:")
+            print(f"  수동배정: 일본어 {available_japanese}명, 중국어 {available_chinese}명 (총 {total_available}명)")
+            print(f"  빈 칸: A반 {empty_slots['A']}개, B반 {empty_slots['B']}개, C반 {empty_slots['C']}개, D반 {empty_slots['D']}개 (총 {total_empty}개)")
+            
+            if total_empty == 0:
+                print(f"  → 빈 칸 없음")
+                continue
+            
+            # 각 목표반의 부족분 계산
+            target_needs = {}
+            for target in target_classes:
+                japanese_need = target_language[target]['일본어'] - current_language[target]['일본어']
+                chinese_need = target_language[target]['중국어'] - current_language[target]['중국어']
+                target_needs[target] = {'일본어': max(0, japanese_need), '중국어': max(0, chinese_need)}
+            
+            # 우선순위: 부족분이 큰 반부터 처리
+            # 일본어 우선 배치
+            remaining_japanese = available_japanese
+            remaining_chinese = available_chinese
+            
+            # 각 목표반별 추천 초기화
+            for target in target_classes:
+                language_recommendations[prev_class][gender][target] = {
+                    '일본어': 0,
+                    '중국어': 0
+                }
+            
+            # 1단계: 각 목표반의 부족분 비율에 따라 배분
+            total_japanese_need = sum(target_needs[t]['일본어'] for t in target_classes)
+            total_chinese_need = sum(target_needs[t]['중국어'] for t in target_classes)
+            
+            for target in target_classes:
+                if empty_slots[target] == 0:
+                    continue
+                
+                # 이 목표반에 배치할 일본어/중국어 수 계산
+                if total_japanese_need > 0:
+                    japanese_ratio = target_needs[target]['일본어'] / total_japanese_need
+                    target_japanese = min(
+                        int(available_japanese * japanese_ratio + 0.5),  # 반올림
+                        empty_slots[target],
+                        remaining_japanese
+                    )
+                else:
+                    target_japanese = 0
+                
+                if total_chinese_need > 0:
+                    chinese_ratio = target_needs[target]['중국어'] / total_chinese_need
+                    target_chinese = min(
+                        int(available_chinese * chinese_ratio + 0.5),  # 반올림
+                        empty_slots[target] - target_japanese,
+                        remaining_chinese
+                    )
+                else:
+                    target_chinese = 0
+                
+                language_recommendations[prev_class][gender][target]['일본어'] = target_japanese
+                language_recommendations[prev_class][gender][target]['중국어'] = target_chinese
+                
+                remaining_japanese -= target_japanese
+                remaining_chinese -= target_chinese
+            
+            # 2단계: 남은 학생을 빈 칸이 있는 곳에 배치
+            for target in target_classes:
+                current_assigned = language_recommendations[prev_class][gender][target]['일본어'] + \
+                                 language_recommendations[prev_class][gender][target]['중국어']
+                remaining_slots = empty_slots[target] - current_assigned
+                
+                if remaining_slots > 0 and remaining_japanese > 0:
+                    add_japanese = min(remaining_slots, remaining_japanese)
+                    language_recommendations[prev_class][gender][target]['일본어'] += add_japanese
+                    remaining_japanese -= add_japanese
+                    remaining_slots -= add_japanese
+                
+                if remaining_slots > 0 and remaining_chinese > 0:
+                    add_chinese = min(remaining_slots, remaining_chinese)
+                    language_recommendations[prev_class][gender][target]['중국어'] += add_chinese
+                    remaining_chinese -= add_chinese
+            
+            # 결과 출력
+            print(f"  추천 배치:")
+            for target in target_classes:
+                rec = language_recommendations[prev_class][gender][target]
+                if rec['일본어'] > 0 or rec['중국어'] > 0:
+                    print(f"    → {target}반: 일본어 {rec['일본어']}칸, 중국어 {rec['중국어']}칸")
+    
+    print("\n" + "=" * 80)
+else:
+    # 추천 비활성화 시 빈 딕셔너리로 초기화
+    language_recommendations = {}
+    print("\n제2외국어 자리 배치 추천: 비활성화")
+    print("=" * 80)
+
 # 분리 규칙 위반 확인 (최종)
 violations = []
 violation_pairs = {}
@@ -853,30 +1083,9 @@ colors = {
     'D': PatternFill(start_color='FF7C80', end_color='FF7C80', fill_type='solid')
 }
 
-header_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
-header_font = Font(bold=True)
-center_align = Alignment(horizontal='center', vertical='center')
-border_style = Border(
-    left=Side(style='thin'),
-    right=Side(style='thin'),
-    top=Side(style='thin'),
-    bottom=Side(style='thin')
-)
-
-# 이하 원래 엑셀 생성 코드 계속...
-# 죽은 코드는 제거되고 여기서부터는 정상 코드
-
-# 엑셀 파일 생성
-wb = Workbook()
-ws = wb.active
-ws.title = "반편성 배정표"
-
-colors = {
-    'A': PatternFill(start_color='92D050', end_color='92D050', fill_type='solid'),
-    'B': PatternFill(start_color='FFC000', end_color='FFC000', fill_type='solid'),
-    'C': PatternFill(start_color='5B9BD5', end_color='5B9BD5', fill_type='solid'),
-    'D': PatternFill(start_color='FF7C80', end_color='FF7C80', fill_type='solid')
-}
+# 제2외국어 추천 색깔 (빈 칸용)
+japanese_fill = PatternFill(start_color='B4A7D6', end_color='B4A7D6', fill_type='solid')  # 보라색
+chinese_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')   # 노란색
 
 header_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
 header_font = Font(bold=True)
@@ -887,8 +1096,6 @@ border_style = Border(
     top=Side(style='thin'),
     bottom=Side(style='thin')
 )
-
-# 이하 원래 엑셀 코드 계속...
 
 current_row = 1
 
@@ -980,6 +1187,26 @@ for prev_class in previous_classes:
                 else:
                     cell_학번.font = Font()
                     cell_이름.font = Font()
+            else:
+                # 빈 칸 - 제2외국어 추천 색깔 적용
+                # 이 빈 칸이 몇 번째 빈 칸인지 계산
+                empty_index = i - len(prev_male_students) - 1
+                
+                # 추천 결과에서 일본어/중국어 칸 수 가져오기
+                if prev_class in language_recommendations and 'male' in language_recommendations[prev_class]:
+                    rec = language_recommendations[prev_class]['male'].get(target, {'일본어': 0, '중국어': 0})
+                    japanese_slots = rec['일본어']
+                    
+                    # 처음 japanese_slots개는 보라색, 나머지는 노란색
+                    if empty_index < japanese_slots:
+                        cell_학번.fill = japanese_fill
+                        cell_이름.fill = japanese_fill
+                    else:
+                        cell_학번.fill = chinese_fill
+                        cell_이름.fill = chinese_fill
+                else:
+                    # 추천 정보가 없으면 기본 색(목표반 색)
+                    pass
         
         # 여학생 데이터
         ws.cell(row=current_row, column=17).value = current_grade
@@ -1014,6 +1241,26 @@ for prev_class in previous_classes:
                 else:
                     cell_학번.font = Font()
                     cell_이름.font = Font()
+            else:
+                # 빈 칸 - 제2외국어 추천 색깔 적용
+                # 이 빈 칸이 몇 번째 빈 칸인지 계산
+                empty_index = i - len(prev_female_students) - 1
+                
+                # 추천 결과에서 일본어/중국어 칸 수 가져오기
+                if prev_class in language_recommendations and 'female' in language_recommendations[prev_class]:
+                    rec = language_recommendations[prev_class]['female'].get(target, {'일본어': 0, '중국어': 0})
+                    japanese_slots = rec['일본어']
+                    
+                    # 처음 japanese_slots개는 보라색, 나머지는 노란색
+                    if empty_index < japanese_slots:
+                        cell_학번.fill = japanese_fill
+                        cell_이름.fill = japanese_fill
+                    else:
+                        cell_학번.fill = chinese_fill
+                        cell_이름.fill = chinese_fill
+                else:
+                    # 추천 정보가 없으면 기본 색(목표반 색)
+                    pass
         
         current_row += 1
     
@@ -1230,10 +1477,22 @@ if len(df_manual_students) > 0:
         except:
             ws.cell(row=current_row, column=7).value = ''
         
+        # 제2외국어에 따른 배경색 결정
+        language = student.get('제2외국어', '')
+        row_fill = None
+        if pd.notna(language):
+            lang_str = str(language)
+            if '일' in lang_str:
+                row_fill = japanese_fill
+            elif '중' in lang_str:
+                row_fill = chinese_fill
+        
         for col in range(1, 8):
             cell = ws.cell(row=current_row, column=col)
             cell.border = border_style
             cell.alignment = center_align
+            if row_fill:
+                cell.fill = row_fill
         
         current_row += 1
 else:

@@ -41,6 +41,8 @@ if 'separation_data' not in st.session_state:
     st.session_state.separation_data = None
 if 'assignment_file' not in st.session_state:
     st.session_state.assignment_file = None
+if 'enable_language_recommendation' not in st.session_state:
+    st.session_state.enable_language_recommendation = False
 
 # Step 0: 4반/3반 편성 선택
 if st.session_state.step == 0:
@@ -59,6 +61,20 @@ if st.session_state.step == 0:
         key="mode_radio"
     )
     st.session_state.assign_mode = mode
+
+    st.markdown("---")
+    st.subheader("추가 옵션")
+    
+    enable_recommendation = st.checkbox(
+        "제2외국어(일본어/중국어) 자리 배치 추천 활성화",
+        value=st.session_state.enable_language_recommendation,
+        help="빈 칸에 일본어(보라색) 또는 중국어(노란색) 추천 색깔을 표시합니다. "
+             "각 반의 일본어/중국어 학생 수가 최대한 균등하게 배치되도록 추천합니다. "
+             "(완전 균일하지는 않으며, 최소 2~3명 이내로 차이날 수 있습니다.) "
+             "비활성화하면 빈 칸은 목표반 색깔로만 표시됩니다.",
+        key="language_recommendation_checkbox"
+    )
+    st.session_state.enable_language_recommendation = enable_recommendation
 
     if st.button("다음 단계로", type="primary"):
         st.session_state.step = 1
@@ -174,9 +190,10 @@ elif st.session_state.step == 2:
                             shutil.copy(student_temp, original_student)
                             shutil.copy(separation_temp, original_separation)
 
-                            # 환경변수로 ASSIGN_MODE 전달
+                            # 환경변수로 ASSIGN_MODE와 제2외국어 추천 옵션 전달
                             env = os.environ.copy()
                             env["ASSIGN_MODE"] = st.session_state.assign_mode
+                            env["ENABLE_LANGUAGE_RECOMMENDATION"] = "1" if st.session_state.enable_language_recommendation else "0"
 
                             result = subprocess.run(
                                 [sys.executable, "create_final_assignment.py"],
